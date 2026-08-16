@@ -36,6 +36,7 @@ export async function POST(request: Request) {
   });
 
   if (error) {
+    console.error("owner/request-link signInWithOtp failed:", error);
     return NextResponse.json({ error: "send_failed" }, { status: 500 });
   }
 
