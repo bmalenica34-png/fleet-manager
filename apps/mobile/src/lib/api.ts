@@ -19,7 +19,17 @@ export async function apiFetch<T = unknown>(path: string, init: RequestInit = {}
 
   if (!response.ok) {
     const body = await response.json().catch(() => null);
-    throw new Error(body?.error ?? `request_failed_${response.status}`);
+    // Naša API vraća { error: "neki_string" }, ali npr. Vercel Deployment
+    // Protection vraća { error: { code, message } } - ne pretpostavljati
+    // da je body.error uvijek string, inače new Error(objekt) postane
+    // doslovno "[object Object]".
+    const message =
+      typeof body?.error === "string"
+        ? body.error
+        : typeof body?.error?.message === "string"
+          ? body.error.message
+          : `request_failed_${response.status}`;
+    throw new Error(message);
   }
 
   return response.json();

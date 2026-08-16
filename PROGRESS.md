@@ -608,6 +608,37 @@ tražio da se zapamte jer bi se mogli ponoviti.
     WiFi mreži kao razvojno računalo za testiranje mobilea - poziva pravi
     Vercel URL koji je dostupan bilo gdje.
 
+22. ⚠️ **Vercel Deployment Protection NIJE stvarno bio isključen** (unatoč
+    korisnikovoj potvrdi "isključen, testirano i radi") - "test kroz
+    browser radi" je lažno pozitivan jer je korisnikov browser već imao
+    aktivnu Vercel dashboard sesiju (SSO cookie), pa je transparentno
+    prošao zaštitu. Mobile app (bez browser sesije) je na svaki API poziv
+    dobivao `401` s tijelom `{"protection":{"vercel_auth_enabled":true,
+    ...},"error":{"code":"401","message":"Protected deployment"}}` -
+    potvrđeno direktnim `curl` pozivom na produkcijski URL, ponovljeno 3x,
+    dosljedno.
+
+    **Usput otkriven pravi bug u mobile error handlingu koji je ovo
+    sakrio:** `apps/mobile/src/lib/api.ts` `apiFetch` je radio `throw new
+    Error(body?.error ?? ...)` pretpostavljajući da je `body.error` uvijek
+    string (tako naša vlastita API vraća greške - `{error: "not_authorized"}`
+    itd). Vercelov protection-error JSON ima DRUGAČIJI oblik -
+    `error` je OBJEKT (`{code, message}`), ne string. `new Error(objekt)`
+    tiho coerca argument u `"[object Object]"` preko `String()` - zato je
+    login ekran pokazivao tu besmislenu poruku umjesto stvarnog uzroka.
+    **Fix:** `apiFetch` sad provjerava je li `body.error` string, inače
+    pokušava `body.error.message`, inače fallback na
+    `request_failed_<status>` - radi ispravno i za naš oblik grešaka i za
+    Vercelov. Nakon fixa login ekran ispravno pokazuje "Protected
+    deployment".
+
+    **Preostaje korisnikova akcija:** stvarno isključiti Deployment
+    Protection u Vercel dashboardu (Project Settings → Deployment
+    Protection → Vercel Authentication → Off) - dosad samo NAVODNO
+    isključeno, provjera mora biti preko zahtjeva BEZ Vercel sesije (npr.
+    curl, ili mobile app, ne ulogirani browser) da se izbjegne isti lažni
+    pozitivan test.
+
 ---
 
 ## 3. Arhitektonske odluke i zašto
