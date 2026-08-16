@@ -4,9 +4,10 @@ Dinamički log stanja projekta. Ažurira se na kraju svake sesije. Za statičnu
 arhitekturu/konvencije vidi [CLAUDE.md](CLAUDE.md) — ovaj dokument je "što je
 gotovo i zašto", ne "kako treba izgledati".
 
-**Zadnje ažurirano:** 2026-08-15, sesija koja je pokrila modul 7 fazu 1
-(mobile auth + skeleton) — nastavak sesije koja je pokrila module 1-6 +
-registracije/police osiguranja + modul 8.
+**Zadnje ažurirano:** 2026-08-16, sesija koja je popravila Vercel deploy
+(bug #20) i prebacila mobile na produkcijski backend (bug #21) — nastavak
+sesije koja je pokrila modul 7 fazu 1 (mobile auth + skeleton) i module
+1-6 + registracije/police osiguranja + modul 8.
 
 ---
 
@@ -164,9 +165,11 @@ na istom URL-u `/home` jer parentheses folderi ne dodaju segment u putanju.
 
 `apps/mobile/.env` (gitignored, isti obrazac kao `apps/web/.env`):
 `EXPO_PUBLIC_SUPABASE_URL`, `EXPO_PUBLIC_SUPABASE_ANON_KEY`,
-`EXPO_PUBLIC_API_BASE_URL` (LAN IP korisnikovog računala, ne `localhost` —
-telefon preko Expo Go mora moći dosegnuti Next.js dev server; mijenja se
-ako se promijeni mreža).
+`EXPO_PUBLIC_API_BASE_URL` — **od bug #21 (vidi sekciju 2) pokazuje na
+produkcijski Vercel backend
+(`https://fleet-manager-web-branimir-s-projects1.vercel.app`), ne na LAN
+IP dev servera.** Telefon više ne mora biti na istoj WiFi mreži kao
+računalo za testiranje mobilea.
 
 **Verifikacija napravljena bez uređaja** (Claude Browser Pane ne može
 prikazati Expo app): `tsc --noEmit` čisto na `apps/web` i `apps/mobile`,
@@ -588,6 +591,23 @@ tražio da se zapamte jer bi se mogli ponoviti.
     → Deployment Protection. Nije dirano ovom sesijom (project-setting
     odluka, izvan dosega "popravi build" zadatka).
 
+21. **Mobile prebačen s lokalnog dev servera na produkcijski Vercel
+    backend.** Nakon što je korisnik potvrdio da je backend live na Vercelu
+    i Deployment Protection isključen (ručno, izvan Claude-a, potvrđeno
+    testom), `apps/mobile/.env` `EXPO_PUBLIC_API_BASE_URL` promijenjen s
+    `http://10.239.153.5:3000` (LAN IP dev servera, postavljen pri modul 7
+    fazu 1 setupu) na
+    `https://fleet-manager-web-branimir-s-projects1.vercel.app`.
+    `EXPO_PUBLIC_SUPABASE_URL`/`EXPO_PUBLIC_SUPABASE_ANON_KEY` nepromijenjeni
+    (isti Supabase projekt, dev i produkcija dijele bazu - nema odvojenog
+    staging Supabase projekta). Expo/Metro dev server (`expo start
+    --dev-client`) je bio pokrenut u pozadini pri promjeni - ugašen i
+    ponovno pokrenut da pokupi novu `.env` vrijednost (Expo učitava
+    `EXPO_PUBLIC_*` varijable jednom pri startu procesa, ne hot-reloada ih
+    na promjenu fajla). Posljedica: telefon više ne mora biti na istoj
+    WiFi mreži kao razvojno računalo za testiranje mobilea - poziva pravi
+    Vercel URL koji je dostupan bilo gdje.
+
 ---
 
 ## 3. Arhitektonske odluke i zašto
@@ -728,12 +748,11 @@ nastavku:
    na custom scheme neće proći Supabase-ovu provjeru. Ovo NIJE napravljeno
    ovom sesijom (dashboard akcija, izvan dosega alata).
 2. `pnpm --filter mobile start` (ili `pnpm --filter mobile android/ios`),
-   otvoriti u Expo Go na telefonu, login kao owner
+   otvoriti u dev-client appu na telefonu, login kao owner
    (`b.malenica34@gmail.com`), kliknuti pravi magic link, potvrditi routing
    na `owner/home` + live broj vozila + session persistencija + logout.
-   `EXPO_PUBLIC_API_BASE_URL` u `apps/mobile/.env` je trenutno postavljen na
-   `http://10.239.153.5:3000` (LAN IP stroja s kojeg je rađen ovaj setup) —
-   ako se testira s druge mreže/stroja, ažurirati tu vrijednost.
+   `EXPO_PUBLIC_API_BASE_URL` gađa produkcijski Vercel backend od bug #21 —
+   telefon više NE mora biti na istoj mreži kao računalo.
 3. Za pravi client-only test (ne owner) treba drugi test email iz baze
    (vidi sekciju 6) jer owner i glavni test client dijele isti mail, pa
    `/api/auth/mobile/resolve` uvijek vraća `role: "owner"` za taj mail
