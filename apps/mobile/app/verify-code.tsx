@@ -52,10 +52,10 @@ export default function VerifyCode() {
 
       <TextInput
         style={styles.input}
-        placeholder="123456"
+        placeholder="12345678"
         keyboardType="number-pad"
         autoFocus
-        maxLength={6}
+        maxLength={8}
         value={code}
         onChangeText={setCode}
       />
@@ -63,9 +63,9 @@ export default function VerifyCode() {
       {error ? <Text style={styles.error}>{error}</Text> : null}
 
       <Pressable
-        style={[styles.button, (verifying || code.trim().length < 6) && styles.buttonDisabled]}
+        style={[styles.button, (verifying || code.trim().length === 0) && styles.buttonDisabled]}
         onPress={handleVerify}
-        disabled={verifying || code.trim().length < 6}
+        disabled={verifying || code.trim().length === 0}
       >
         <Text style={styles.buttonText}>{verifying ? "Provjeravam..." : "Potvrdi"}</Text>
       </Pressable>
@@ -86,9 +86,9 @@ const styles = StyleSheet.create({
     borderColor: "#ccc",
     borderRadius: 8,
     padding: 12,
-    fontSize: 24,
+    fontSize: 22,
     textAlign: "center",
-    letterSpacing: 8,
+    letterSpacing: 4,
   },
   error: { color: "#c00", textAlign: "center" },
   button: { backgroundColor: "#111", padding: 14, borderRadius: 8, alignItems: "center" },
