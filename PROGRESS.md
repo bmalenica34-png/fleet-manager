@@ -759,6 +759,28 @@ tražio da se zapamte jer bi se mogli ponoviti.
     isti provider bi se mogao iskoristiti i za Supabase Auth mailove da se
     izbjegne ugrađeni limit prije stvarne upotrebe s pravim klijentima.
 
+26. **`RESEND_FROM_EMAIL` prebačen s privremenog `onboarding@resend.dev`
+    na pravu adresu s verificirane domene, `noreply@navalis-cissa.hr`**
+    (korisnik verificirao domenu u Resendu, izvan ove sesije). Ažurirano
+    na tri mjesta: root `.env` (izvor istine, ovom sesijom već bio
+    ažuriran prije nego je zatraženo), `apps/web/.env` (sinkroniziran s
+    rootom, isti obrazac kao uvijek), i Vercel Production + Preview env
+    (preko `vercel env rm` + `vercel env add`, nema direktan "update").
+    **Vercel env varijable se ne primjenjuju retroaktivno na postojeći
+    deployment** - triggeran redeploy preko `vercel redeploy <deployment-
+    url> --target production` (ne `vercel --prod`, koji pokušava lokalni
+    upload cijelog radnog direktorija - pukao na 1.8GB uploadu jer bi
+    pokupio i node_modules/build cacheve bez `.vercelignore`-a; `redeploy`
+    umjesto toga rebuilda POSTOJEĆI deployment iz Gita, brzo i čisto).
+    Redeploy uspio (`✓ Ready in 2m`), glavni alias `fleet-manager-web-
+    branimir-s-projects1.vercel.app` potvrđeno odgovara na novom buildu.
+    **Napomena:** stvarna "From" adresa u poslanom mailu NIJE testirana
+    pravim slanjem (izbjegnuto trošenje preostalog Resend/Supabase
+    send kvota nakon bug #25) - potvrđeno je da je vrijednost ispravno
+    spremljena u Vercel config za oba okruženja i da je nova build
+    verzija live, što je dovoljno da se runtime `process.env` ažurirao
+    (Next.js API rute čitaju env svježe pri svakom pozivu).
+
 ---
 
 ## 3. Arhitektonske odluke i zašto
