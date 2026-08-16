@@ -704,6 +704,39 @@ tražio da se zapamte jer bi se mogli ponoviti.
     su bili nužni ali ne i dovoljni koraci, ovo je bio četvrti i konačni
     sloj istog lanca.
 
+24. ⚠️ **Mobile app se zaglavljivao na `auth-callback` ekranu nakon klika
+    na magic link - beskonačan spinner, bez greške.** Root cause NIJE bio
+    server (potvrđeno: direktan `curl` na `/api/auth/mobile/resolve` s
+    pravim Bearer tokenom - generiranim preko Supabase Admin API
+    `generateLink` + `verifyOtp`, bez potrebe za klikom na pravi mail -
+    vratio `200 OK` za ~2.3s; `vercel logs` za taj endpoint pokazao SAMO
+    moje test pozive, NIJEDAN sa stvarnog telefona). Zaključak: zahtjev s
+    telefona nikad nije ni stigao do servera - hang je na mobile strani,
+    ili u deep-link handlingu (`Linking.getInitialURL()`/`addEventListener`
+    nikad ne uhvate URL) ili u `supabase.auth.setSession()` pozivu, prije
+    ijednog network poziva na naš backend. Točan uzrok NIJE identificiran
+    (nije se moglo debugirati na fizičkom uređaju iz ove sesije).
+    **Fix (čini hang nemogućim ubuduće, umjesto lova na točan uzrok):**
+    - `apps/mobile/src/lib/api.ts` `apiFetch` - goli `fetch()` nije imao
+      nikakav timeout, pa spor/mrtav mrežni put ostavlja pozivatelja
+      zauvijek u "loading" stanju. Dodan `AbortController` s 15s
+      timeoutom, `AbortError` se prevodi u čitljiv `"request_timeout"`.
+    - `apps/mobile/app/auth-callback.tsx` - dva nova safety-neta: (1) ako
+      se deep link UOPĆE ne uhvati u 20s (ni `getInitialURL` ni `url`
+      event), `stuckTimer` postavlja error state umjesto vječnog spinnera;
+      (2) `supabase.auth.setSession()` omotan u `withTimeout` helper (20s)
+      za slučaj da SAM Supabase poziv visi. Error ekran sad ima i "Natrag
+      na prijavu" gumb (`router.replace("/login")`) - prije nije postojao
+      IZLAZ iz error stanja, samo statična poruka.
+    - `AuthProvider`s `resolveForSession` catch (već postojao) sad stvarno
+      radi kako je zamišljeno - prije je čekao fetch koji se NIKAD ne bi
+      odbio (bez timeouta), sad se odbija nakon 15s pa correctly pada na
+      `status: "signed-out"`.
+    **Preostaje za sljedeću sesiju s pristupom uređaju:** kad se error
+    stanje pojavi, poruka ("timeout" vs `sessionError.message` vs
+    `invalid_link`) će konačno reći KOJI konkretan korak visi - do sada je
+    to bilo nemoguće znati jer se ništa nije nikad prikazalo.
+
 ---
 
 ## 3. Arhitektonske odluke i zašto

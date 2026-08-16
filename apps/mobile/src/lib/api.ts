@@ -1,6 +1,7 @@
 import { supabase } from "./supabase";
 
 const API_BASE_URL = process.env.EXPO_PUBLIC_API_BASE_URL!;
+const DEFAULT_TIMEOUT_MS = 15000;
 
 export async function apiFetch<T = unknown>(path: string, init: RequestInit = {}): Promise<T> {
   const {
@@ -15,7 +16,27 @@ export async function apiFetch<T = unknown>(path: string, init: RequestInit = {}
     headers.set("Content-Type", "application/json");
   }
 
-  const response = await fetch(`${API_BASE_URL}${path}`, { ...init, headers });
+  // Goli fetch() nema default timeout - bez ovoga, spor/mrtav mrežni put
+  // (loš signal, DNS problem, server koji ne odgovara) ostavlja pozivatelja
+  // zauvijek u "loading" stanju bez ikakve povratne informacije.
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), DEFAULT_TIMEOUT_MS);
+
+  let response: Response;
+  try {
+    response = await fetch(`${API_BASE_URL}${path}`, {
+      ...init,
+      headers,
+      signal: controller.signal,
+    });
+  } catch (err) {
+    if (err instanceof Error && err.name === "AbortError") {
+      throw new Error("request_timeout");
+    }
+    throw err;
+  } finally {
+    clearTimeout(timeoutId);
+  }
 
   if (!response.ok) {
     const body = await response.json().catch(() => null);
