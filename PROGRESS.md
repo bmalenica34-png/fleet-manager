@@ -737,6 +737,28 @@ tražio da se zapamte jer bi se mogli ponoviti.
     `invalid_link`) će konačno reći KOJI konkretan korak visi - do sada je
     to bilo nemoguće znati jer se ništa nije nikad prikazalo.
 
+25. ⚠️ **"send_failed" greška na `/api/auth/{owner,client}/request-link` -
+    NIJE kod bug, Supabase-ov ugrađeni email rate limit potrošen.**
+    Route je i prije ovog bug-a ispravno hvatao `signInWithOtp` grešku, ali
+    ju je gutao u generički `{error: "send_failed"}` bez logiranja pravog
+    razloga. Dodan `console.error(...)` prije returna u obje request-link
+    rute (owner i client) - trajno korisno, ne samo za ovaj debug. Nakon
+    toga, `vercel logs` otkrio pravi uzrok:
+    `AuthApiError: email rate limit exceeded, status: 429, code:
+    'over_email_send_rate_limit'`. Supabase-ov DEFAULT/ugrađeni email
+    servis (shared SMTP, namijenjen samo za testiranje) ima vrlo nizak
+    limit (par mailova na sat) - iscrpljen nakupljenim testiranjem kroz
+    cijelu sesiju (curl testovi iz bugova #22/#23/#24 + korisnikovi vlastiti
+    pokušaji, svi na isti `b.malenica34@gmail.com`).
+    **Kratkoročno:** pričekati ~1h da se limit resetira, izbjegavati
+    gomilanje test zahtjeva u kratkom periodu.
+    **Trajno rješenje (nije napravljeno ovom sesijom - Supabase dashboard
+    akcija, korisnikovi kredencijali):** postaviti custom SMTP u Supabase
+    dashboardu (Authentication → Email Templates/SMTP Settings) preko
+    Resenda - projekt već ima `RESEND_API_KEY` za druge mailove (module 4),
+    isti provider bi se mogao iskoristiti i za Supabase Auth mailove da se
+    izbjegne ugrađeni limit prije stvarne upotrebe s pravim klijentima.
+
 ---
 
 ## 3. Arhitektonske odluke i zašto
