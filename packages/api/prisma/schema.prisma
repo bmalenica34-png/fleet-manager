@@ -1,0 +1,226 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+// ---------------------------------------------------------------------------
+// Vehicle
+// ---------------------------------------------------------------------------
+
+model Vehicle {
+  id                 String   @id @default(cuid())
+  make               String
+  model              String
+  year               Int?
+  licensePlate       String   @unique
+  vin                String?  @unique
+  registrationDocKey String? // prometna (S3 key na Hetzneru, ne raw URL)
+  insurancePolicyKey String? // polica osiguranja (S3 key)
+
+  // Datum isteka registracije (godišnji tehnički pregled). Podsjetnici idu
+  // klijentu koji trenutno iznajmljuje vozilo i vlasniku 7/3/0 dana prije.
+  registrationExpiresAt DateTime?
+
+  // Dedupe per-milestone da dnevni cron ne pošalje isti podsjetnik dvaput.
+  registrationReminder7SentAt DateTime?
+  registrationReminder3SentAt DateTime?
+  registrationReminder0SentAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  images    VehicleImage[]
+  contracts Contract[]
+
+  @@map("vehicles")
+}
+
+model VehicleImage {
+  id        String   @id @default(cuid())
+  vehicleId String
+  vehicle   Vehicle  @relation(fields: [vehicleId], references: [id], onDelete: Cascade)
+  key       String
+  createdAt DateTime @default(now())
+
+  @@map("vehicle_images")
+}
+
+// ---------------------------------------------------------------------------
+// Owner
+// ---------------------------------------------------------------------------
+
+model Owner {
+  id    String @id @default(cuid())
+  email String @unique
+  name  String?
+
+  // Poveže se s Supabase auth accountom nakon prvog uspješnog magic-link
+  // logina. Owner redovi se pre-provisioniraju ručno (po emailu) - login
+  // stranica odbija emailove koji ovdje ne postoje, prije nego se uopće
+  // pošalje magic link.
+  userId String? @unique
+
+  createdAt DateTime @default(now())
+
+  @@map("owners")
+}
+
+// ---------------------------------------------------------------------------
+// Client
+// ---------------------------------------------------------------------------
+
+model Client {
+  id                String   @id @default(cuid())
+  firstName         String
+  lastName          String
+  oib               String   @unique
+  email             String
+  phone             String
+  driverLicenseKey  String?
+  idDocumentKey     String?
+  // Poveže se s Supabase auth accountom kad se klijent registrira/potvrdi.
+  // Nullable jer klijent može kompletirati cijeli signing flow bez accounta.
+  userId            String?  @unique
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  contracts Contract[]
+
+  @@map("clients")
+}
+
+// ---------------------------------------------------------------------------
+// Contract
+// ---------------------------------------------------------------------------
+
+enum ContractStatus {
+  draft
+  sent
+  signed
+  expired
+}
+
+model Contract {
+  id        String         @id @default(cuid())
+  vehicleId String
+  vehicle   Vehicle        @relation(fields: [vehicleId], references: [id])
+  clientId  String
+  client    Client         @relation(fields: [clientId], references: [id])
+  dateFrom  DateTime
+  dateTo    DateTime
+  status    ContractStatus @default(draft)
+
+  // Jednokratan JWT signing token, 48h expiry, invalidira se odmah nakon potpisa.
+  signingToken           String?   @unique
+  signingTokenExpiresAt  DateTime?
+  signedAt               DateTime?
+  signatureKey           String?
+
+  contractPdfKey String?
+  protocolPdfKey String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  handoverPhotos HandoverPhoto[]
+  annexes        Annex[]
+  photoRequests  PhotoRequest[]
+
+  @@index([clientId])
+  @@index([vehicleId])
+  @@index([status])
+  @@map("contracts")
+}
+
+// ---------------------------------------------------------------------------
+// HandoverPhoto
+// ---------------------------------------------------------------------------
+
+enum PhotoAngle {
+  front
+  back
+  left
+  right
+  interior_dashboard
+  interior_seats
+  odometer
+  other
+}
+
+model HandoverPhoto {
+  id       String @id @default(cuid())
+  contractId String
+  contract   Contract @relation(fields: [contractId], references: [id], onDelete: Cascade)
+
+  // Ako je slika nastala kao odgovor na periodični zahtjev za slikanje
+  // tijekom aktivnog najma, a ne kod primopredaje.
+  photoRequestId String?
+  photoRequest   PhotoRequest? @relation(fields: [photoRequestId], references: [id])
+
+  angle             PhotoAngle
+  key               String
+  damageDescription String?
+
+  createdAt DateTime @default(now())
+
+  @@index([contractId])
+  @@index([photoRequestId])
+  @@map("handover_photos")
+}
+
+// ---------------------------------------------------------------------------
+// Annex (produženje ugovora)
+// ---------------------------------------------------------------------------
+
+enum AnnexStatus {
+  draft
+  sent
+  signed
+  expired
+}
+
+model Annex {
+  id               String      @id @default(cuid())
+  parentContractId String
+  parentContract   Contract    @relation(fields: [parentContractId], references: [id])
+  newDateTo        DateTime
+  status           AnnexStatus @default(draft)
+
+  signingToken          String?   @unique
+  signingTokenExpiresAt DateTime?
+  signedAt              DateTime?
+
+  annexPdfKey String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([parentContractId])
+  @@map("annexes")
+}
+
+// ---------------------------------------------------------------------------
+// PhotoRequest (periodično slikanje tijekom najma)
+// ---------------------------------------------------------------------------
+
+model PhotoRequest {
+  id          String    @id @default(cuid())
+  contractId  String
+  contract    Contract  @relation(fields: [contractId], references: [id])
+  requestedAt DateTime  @default(now())
+  fulfilledAt DateTime?
+
+  // Jednokratan JWT token (48h), isti mehanizam kao Contract/Annex signing.
+  requestToken          String?   @unique
+  requestTokenExpiresAt DateTime?
+
+  photos HandoverPhoto[]
+
+  @@index([contractId])
+  @@map("photo_requests")
+}

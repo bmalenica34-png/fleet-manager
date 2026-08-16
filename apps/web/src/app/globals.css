@@ -1,0 +1,249 @@
+:root {
+  --background: #ffffff;
+  --foreground: #171717;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --background: #0a0a0a;
+    --foreground: #ededed;
+  }
+}
+
+html,
+body {
+  max-width: 100vw;
+  overflow-x: hidden;
+}
+
+body {
+  color: var(--foreground);
+  background: var(--background);
+  font-family: Arial, Helvetica, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+* {
+  box-sizing: border-box;
+  padding: 0;
+  margin: 0;
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+@media (prefers-color-scheme: dark) {
+  html {
+    color-scheme: dark;
+  }
+}
+
+.topnav {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 1rem 1.5rem;
+  border-bottom: 1px solid rgba(128, 128, 128, 0.25);
+}
+
+.topnav .brand {
+  font-weight: 700;
+}
+
+.topnav nav {
+  display: flex;
+  gap: 1.25rem;
+}
+
+.topnav nav a:hover {
+  text-decoration: underline;
+}
+
+.page {
+  max-width: 960px;
+  margin: 0 auto;
+  padding: 1.5rem;
+}
+
+.page h1 {
+  margin-bottom: 1rem;
+}
+
+.toolbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 1rem;
+}
+
+.btn {
+  display: inline-block;
+  padding: 0.5rem 0.9rem;
+  border-radius: 6px;
+  border: 1px solid rgba(128, 128, 128, 0.4);
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  font-size: 0.9rem;
+}
+
+.btn:hover {
+  background: rgba(128, 128, 128, 0.12);
+}
+
+.btn-danger {
+  border-color: #d33;
+  color: #d33;
+}
+
+.btn-primary {
+  border-color: #2563eb;
+  color: #2563eb;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+th,
+td {
+  text-align: left;
+  padding: 0.6rem 0.5rem;
+  border-bottom: 1px solid rgba(128, 128, 128, 0.2);
+  font-size: 0.9rem;
+}
+
+form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.9rem;
+  max-width: 480px;
+}
+
+label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  font-size: 0.85rem;
+}
+
+input,
+select,
+textarea {
+  padding: 0.5rem;
+  border-radius: 6px;
+  border: 1px solid rgba(128, 128, 128, 0.4);
+  background: transparent;
+  color: inherit;
+  font: inherit;
+}
+
+.error {
+  color: #d33;
+  font-size: 0.85rem;
+}
+
+.muted {
+  color: rgba(128, 128, 128, 0.9);
+  font-size: 0.85rem;
+}
+
+.image-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  margin: 0.75rem 0;
+}
+
+.image-grid figure {
+  margin: 0;
+  width: 140px;
+}
+
+.image-grid img {
+  width: 140px;
+  height: 100px;
+  object-fit: cover;
+  border-radius: 6px;
+  display: block;
+}
+
+.sign-shell {
+  max-width: 560px;
+  margin: 0 auto;
+  padding: 1.5rem 1.25rem;
+}
+
+.sign-card {
+  border: 1px solid rgba(128, 128, 128, 0.25);
+  border-radius: 10px;
+  padding: 1.25rem;
+}
+
+.step-indicator {
+  display: flex;
+  gap: 0.4rem;
+  margin-bottom: 1.25rem;
+}
+
+.step-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: rgba(128, 128, 128, 0.3);
+}
+
+.step-dot.active {
+  background: #2563eb;
+}
+
+.angle-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.75rem;
+  margin: 1rem 0;
+}
+
+.angle-slot {
+  border: 1px dashed rgba(128, 128, 128, 0.4);
+  border-radius: 8px;
+  padding: 0.6rem;
+}
+
+.angle-slot img {
+  width: 100%;
+  height: 90px;
+  object-fit: cover;
+  border-radius: 6px;
+  margin-bottom: 0.4rem;
+}
+
+.angle-slot.done {
+  border-color: #2563eb;
+  border-style: solid;
+}
+
+.angle-slot textarea {
+  width: 100%;
+  min-height: 50px;
+  font-size: 0.8rem;
+  margin-top: 0.4rem;
+}
+
+.signature-pad {
+  border: 1px solid rgba(128, 128, 128, 0.4);
+  border-radius: 8px;
+  touch-action: none;
+  width: 100%;
+}
+
+.step-actions {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 1.25rem;
+  gap: 0.75rem;
+}
