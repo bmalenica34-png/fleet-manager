@@ -1,5 +1,9 @@
 generator client {
-  provider = "prisma-client-js"
+  provider      = "prisma-client-js"
+  // "native" za lokalni dev (Windows), "rhel-openssl-3.0.x" za Vercel-ov
+  // serverless runtime - build kontejner koji pokreće `prisma generate`
+  // nije nužno isti kao runtime kontejner koji izvršava funkciju.
+  binaryTargets = ["native", "rhel-openssl-3.0.x"]
 }
 
 datasource db {

@@ -639,6 +639,29 @@ tražio da se zapamte jer bi se mogli ponoviti.
     curl, ili mobile app, ne ulogirani browser) da se izbjegne isti lažni
     pozitivan test.
 
+23. ⚠️ **Nakon što je Deployment Protection stvarno isključen: `500
+    Internal Server Error` (prazan body) na svaki API poziv.** `vercel
+    logs` (runtime function logovi, ne build logovi) otkrio pravi uzrok:
+    `PrismaClientInitializationError: Prisma Client could not locate the
+    Query Engine for runtime "rhel-openssl-3.0.x"`. Poznat, dobro
+    dokumentiran Prisma+Vercel problem - `prisma generate` (naš postinstall
+    iz bug #20) generira query engine binary za platformu na kojoj se
+    pokreće, ali Vercel-ov build kontejner (gdje se `pnpm install`
+    izvršava) i stvarni Lambda runtime kontejner (gdje se funkcija
+    izvršava po requestu) nisu nužno identična okolina - default
+    "native" binary target ne pokriva `rhel-openssl-3.0.x`.
+    **Fix:** `packages/api/prisma/schema.prisma` generator blok dobio
+    `binaryTargets = ["native", "rhel-openssl-3.0.x"]` (native i dalje
+    treba za lokalni Windows dev). Nakon push-a, Vercel-ov postinstall
+    `prisma generate` regenerira klijenta s oba binary targeta uključena
+    u bundle.
+
+    **Napomena za debugging metodu:** `vercel inspect <url> --logs`
+    pokazuje samo BUILD logove (turbo/next build output), ne runtime
+    greške. Za stvarni stack trace API rute koja puca u produkciji treba
+    `vercel logs <deployment-host>` (runtime function invocation logovi) -
+    ova razlika je izgubila vrijeme prije nego je pronađen pravi log izvor.
+
 ---
 
 ## 3. Arhitektonske odluke i zašto
