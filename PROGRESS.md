@@ -5,9 +5,11 @@ arhitekturu/konvencije vidi [CLAUDE.md](CLAUDE.md) — ovaj dokument je "što je
 gotovo i zašto", ne "kako treba izgledati".
 
 **Zadnje ažurirano:** 2026-08-16, sesija koja je popravila Vercel deploy
-(bug #20) i prebacila mobile na produkcijski backend (bug #21) — nastavak
-sesije koja je pokrila modul 7 fazu 1 (mobile auth + skeleton) i module
-1-6 + registracije/police osiguranja + modul 8.
+(bug #20), prebacila mobile na produkcijski backend (bug #21), i završila
+modul 7 fazu 1 (mobile auth) prebacivanjem na OTP kod nakon što se magic-
+link deep link pokazao nepouzdanim (bug #28) — **potvrđeno live-testirano
+na uređaju, radi.** Nastavak sesije koja je pokrila module 1-6 +
+registracije/police osiguranja + modul 8.
 
 ---
 
@@ -31,7 +33,7 @@ već logiku"). Modul 7 (mobile) je **jedino što ostaje**.
 | 6 | Auth sloj (Supabase) + client-web | ✅ gotovo, testirano uživo (uklj. pravi magic-link klik) |
 | — | Registracija vozila + polica osiguranja (ad-hoc) | ✅ gotovo, testirano uživo |
 | 8 | Photo request flow | ✅ gotovo, testirano uživo |
-| 7 | Mobile appovi (owner-mobile, client-mobile) | 🔶 **Faza 1 (auth + skeleton) gotova, čeka live test na uređaju** |
+| 7 | Mobile appovi (owner-mobile, client-mobile) | 🔶 **Faza 1 (auth + skeleton) gotova, testirano uživo na uređaju — radi** |
 
 Svaki modul označen "testirano uživo" je stvarno proveden kroz browser
 (Claude Browser Pane) ili direktnim HTTP pozivima na dev server, ne samo
@@ -852,6 +854,14 @@ tražio da se zapamte jer bi se mogli ponoviti.
     `{{ .ConfirmationURL }}` neovisno), samo dodaje vidljiv kod u isti
     mail. Bez ove promjene, mobile korisnik neće imati što upisati.
 
+    **✅ Korisnik dodao `{{ .Token }}` u template, ispravio i sitan bug
+    (kod stvarno ima 8 znamenki, ekran je dopuštao samo 6 -
+    `maxLength`/gumb-gate ispravljeni) i potvrdio: cijeli flow radi
+    end-to-end na pravom uređaju.** Login → email s kodom → unos koda →
+    `verifyOtp` → role resolve → `owner/home` prikazuje pravi broj vozila
+    iz baze (bearer-token `GET /api/vehicles` poziv) → logout. Modul 7
+    Faza 1 (auth + skeleton) je time stvarno gotova, ne samo kodno.
+
 ---
 
 ## 3. Arhitektonske odluke i zašto
@@ -983,27 +993,18 @@ ruta = jedna briga" kao ostatak projekta.
 
 ## 5. Sljedeći korak i preostali redoslijed
 
-**Modul 7, Faza 1 (auth + skeleton) je kodno gotova, čeka live test na
-uređaju** — vidi detalje u sekciji 1 pod "Modul 7". Prvi konkretni koraci pri
-nastavku:
+**Modul 7, Faza 1 (auth + skeleton) je gotova i live-testirana na pravom
+uređaju — radi end-to-end** (login → OTP kod iz maila → `owner/home` s
+pravim brojem vozila → logout, potvrdio korisnik). Konačni auth mehanizam
+je OTP kod (ne magic-link deep link — vidi bug #28 zašto). Preostaje:
 
-1. U Supabase dashboardu (Authentication → URL Configuration) ručno dodati
-   `rentacarmanager://**` na redirect URL allowlistu — bez ovoga magic link
-   na custom scheme neće proći Supabase-ovu provjeru. Ovo NIJE napravljeno
-   ovom sesijom (dashboard akcija, izvan dosega alata).
-2. `pnpm --filter mobile start` (ili `pnpm --filter mobile android/ios`),
-   otvoriti u dev-client appu na telefonu, login kao owner
-   (`b.malenica34@gmail.com`), kliknuti pravi magic link, potvrditi routing
-   na `owner/home` + live broj vozila + session persistencija + logout.
-   `EXPO_PUBLIC_API_BASE_URL` gađa produkcijski Vercel backend od bug #21 —
-   telefon više NE mora biti na istoj mreži kao računalo.
-3. Za pravi client-only test (ne owner) treba drugi test email iz baze
+1. Za pravi client-only test (ne owner) treba drugi test email iz baze
    (vidi sekciju 6) jer owner i glavni test client dijele isti mail, pa
    `/api/auth/mobile/resolve` uvijek vraća `role: "owner"` za taj mail
    (identična prioritet-logika kao web callback, vidi ograničenje #9 dolje).
+   Nije testirano ovom sesijom.
 
-**Nakon što faza 1 live-testira uspješno, preostale faze modula 7** (nisu
-još planirane u detalje):
+**Sljedeće faze modula 7** (nisu još planirane u detalje):
 - Owner-mobile feature ekrani: popis/detalj vozila, kreiranje ugovora,
   photo request trigger.
 - Client-mobile feature ekrani: pregled ugovora, dokumenti, potpis, zahtjev
