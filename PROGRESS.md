@@ -781,9 +781,34 @@ tražio da se zapamte jer bi se mogli ponoviti.
     verzija live, što je dovoljno da se runtime `process.env` ažurirao
     (Next.js API rute čitaju env svježe pri svakom pozivu).
 
----
-
-## 3. Arhitektonske odluke i zašto
+27. **Nastavak bug #24 - timeout fix radi (potvrdio korisnik: error se
+    pojavljuje nakon ~20s), ali ekran zaglavljen na `auth-callback`-u i
+    dalje se ne zna GDJE stane.** Oba timeout puta ("URL nikad uhvaćen"
+    vs "setSession() visi") su davala IDENTIČNU poruku ("timeout"), pa
+    korisnikov izvještaj "predugo traje" nije davao dovoljno signala da se
+    zna koji od ta dva slučaja je pravi uzrok. `vercel logs` potvrdio da
+    `/api/auth/mobile/resolve` (poziva se TEK nakon uspješnog
+    `setSession()`) nikad nije pozvan s pravog uređaja - dakle problem je
+    definitivno prije bilo kakvog poziva na naš backend, u samom deep-link
+    handlingu ili u Supabase klijentovom `setSession()`.
+    **Fix (opet dijagnostika, ne popravak - nema pristupa uređaju):**
+    `apps/mobile/app/auth-callback.tsx` sad prati `stage`
+    (`waiting_for_url` → `url_captured` → `setting_session`) i svaki od
+    dva timeout puta ima SVOJU, različitu poruku: "App nije primio link iz
+    maila..." (stuck timer prije ijednog URL-a) vs "Prijava se predugo
+    obrađuje - poveznica je stigla, ali potvrda nije uspjela..." (setSession
+    timeout, URL JE uhvaćen). Dodani `console.log` na svaki korak
+    (getInitialURL rezultat, 'url' event, ulazak/izlazak iz setSession) -
+    vidljivi u Metro logu dok je telefon spojen na dev server, jedini
+    trenutno dostupan uvid u ponašanje na fizičkom uređaju.
+    **Sumnja (nepotvrđena):** Supabase-ova hosted "confirm" stranica
+    (na koju magic-link mail prvo vodi prije redirecta na
+    `rentacarmanager://`) ponekad ne uspije auto-redirectati na custom
+    scheme iz in-app browsera mail aplikacije (poznat, čest Android/iOS
+    gotcha) - ako se to potvrdi sljedećim testom (poruka "App nije primio
+    link"), rješenje bi bilo koristiti Supabase-ov `redirectTo` s
+    Universal/App Links umjesto golog custom scheme-a, ili uputiti
+    korisnika da eksplicitno otvori link u sistemskom browseru.
 
 **Owner/Client role razdvajanje preko DB tablice, ne Supabase custom claims.**
 `Owner` model (`id, email @unique, userId? @unique, name`) je izravna
