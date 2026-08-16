@@ -682,6 +682,30 @@ tražio da se zapamte jer bi se mogli ponoviti.
     `@rent-a-car/web:build`, oba "cache miss, executing" na prvi pokušaj sa
     izmijenjenom shemom).
 
+    **Ni to nije bilo dovoljno - ISTA greška na sljedećem deployu, iako je
+    `prisma generate` sad pouzdano izvršen s ispravnim `binaryTargets`.**
+    Pravi, treći sloj problema: Next.js-ov file tracer (`@vercel/nft`,
+    odlučuje koji fajlovi idu u serverless function bundle) ne prati
+    Prisma-in query engine `.so.node` binary jer se on učitava dinamički
+    (po file-path stringu u runtimeu), ne preko `require()`/`import`
+    poziva koje statička analiza vidi - i taj problem je posebno izražen u
+    pnpm monorepo layoutu (duboko ugniježđeni `.pnpm` store). Ovo je
+    poznat, Prisma-om službeno dokumentiran problem
+    (prisma.io/docs → Deploy to Vercel, monorepo sekcija) sa službenim
+    rješenjem: **`@prisma/nextjs-monorepo-workaround-plugin`** - webpack
+    plugin koji eksplicitno kopira engine binary u bundle.
+    **Fix:** `pnpm --filter web add -D @prisma/nextjs-monorepo-workaround-plugin`,
+    pa u `apps/web/next.config.mjs` dodan `webpack` hook koji (samo za
+    server build, `isServer` provjera) doda `new PrismaPlugin()` u
+    `config.plugins`. Potvrđeno lokalno da `.next/server/chunks/
+    libquery_engine-rhel-openssl-3.0.x.so.node` sad stvarno postoji u
+    outputu (`find .next -iname "*rhel*"`) prije push-a - tri prijašnja
+    "fixa" (binaryTargets, turbo build graph, deployment protection off)
+    su bili nužni ali ne i dovoljni koraci, ovo je bio četvrti i konačni
+    sloj istog lanca.
+
+---
+
 ## 3. Arhitektonske odluke i zašto
 
 **Owner/Client role razdvajanje preko DB tablice, ne Supabase custom claims.**
