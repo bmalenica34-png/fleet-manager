@@ -810,6 +810,52 @@ tražio da se zapamte jer bi se mogli ponoviti.
     Universal/App Links umjesto golog custom scheme-a, ili uputiti
     korisnika da eksplicitno otvori link u sistemskom browseru.
 
+28. ⚠️ **Potvrđeno: bug #27-ova sumnja bila je točna, i riješeno prebacivanjem
+    na OTP kod umjesto magic-link deep linka.** Korisnik prijavio točnu
+    poruku "App nije primio link iz maila" - stuck timer na
+    `waiting_for_url` stageu, znači deep link NIKAD nije stigao do appa.
+    Dijagnosticirano izravnim pozivom na Supabase-ov `verify` endpoint
+    (preko `admin.generateLink` + ručni `curl` na `action_link`): server
+    strana je bila potpuno ispravna cijelo vrijeme -
+    `rentacarmanager://**` JEST na redirect URL allowlisti, Supabase šalje
+    ispravan `303 See Other` s `Location: rentacarmanager://auth-callback
+    #access_token=...&refresh_token=...`. Problem je isključivo u tome što
+    mnogi mail klijenti (Gmail app i sl.) otvaraju linkove u in-app
+    browseru koji iz sigurnosnih razloga blokira automatski redirect na
+    non-http(s) custom scheme - app se nikad ne pokuša otvoriti, OS ne
+    dobije priliku ponuditi "otvori u aplikaciji".
+    **Odluka (korisnik potvrdio, birano između OTP koda / Universal Links
+    / uputa za ručno otvaranje u browseru):** OTP kod - potpuno izbjegava
+    deep-linking, pouzdano radi neovisno o mail klijentu. Universal Links
+    bi bio "pravi" fix ali zahtijeva hosting verifikacijskih fajlova +
+    app.json promjene + NOVI native dev-client build (cijela Windows CMake
+    saga iz bugova #18-19 ponovno).
+    **Implementacija:**
+    - `apps/mobile/app/verify-code.tsx` (nova ruta) - text input za
+      6-znamenkasti kod, poziva `supabase.auth.verifyOtp({email, token:
+      code, type: "email"})` izravno (klijentski Supabase poziv, bez
+      backend poziva).
+    - `apps/mobile/app/check-email.tsx` obrisan, zamijenjen s
+      `verify-code.tsx` - `login.tsx` sad navigira na
+      `/verify-code` s `email` kao route paramom (`useLocalSearchParams`)
+      umjesto na statičan "provjeri poštu" ekran.
+    - `auth-callback.tsx` (deep-link ruta) NIJE uklonjen - ostaje kao
+      besplatan fallback ako link ipak negdje uspije (npr. otvoren u
+      pravom sistemskom browseru), samo više nije primarni put.
+    - `type: "email"` (ne `"magiclink"`) je ključan za `verifyOtp` kod
+      brojčanog koda - potvrđeno prije implementacije, kriv `type` bi
+      dao validation error.
+    **Preostaje korisnikova akcija (Supabase dashboard):** magic-link
+    email template mora sadržavati `{{ .Token }}` da se kod uopće pošalje
+    u mailu - trenutno šalje samo `{{ .ConfirmationURL }}` (link). Dodati
+    `{{ .Token }}` NE uklanja postojeći link (web i dalje koristi
+    `{{ .ConfirmationURL }}` neovisno), samo dodaje vidljiv kod u isti
+    mail. Bez ove promjene, mobile korisnik neće imati što upisati.
+
+---
+
+## 3. Arhitektonske odluke i zašto
+
 **Owner/Client role razdvajanje preko DB tablice, ne Supabase custom claims.**
 `Owner` model (`id, email @unique, userId? @unique, name`) je izravna
 kopija postojećeg `Client.userId` obrasca. Razlog: konzistentnost s

@@ -14,8 +14,9 @@ export default function Login() {
     setError(null);
     setSending(true);
     try {
-      await requestMagicLink(role, email.trim());
-      router.push("/check-email");
+      const trimmedEmail = email.trim();
+      await requestMagicLink(role, trimmedEmail);
+      router.push({ pathname: "/verify-code", params: { email: trimmedEmail } });
     } catch (err) {
       setError(err instanceof Error ? err.message : "Slanje nije uspjelo");
     } finally {
@@ -58,7 +59,7 @@ export default function Login() {
         onPress={handleSubmit}
         disabled={sending || !email.trim()}
       >
-        <Text style={styles.submitText}>{sending ? "Šaljem..." : "Pošalji link za prijavu"}</Text>
+        <Text style={styles.submitText}>{sending ? "Šaljem..." : "Pošalji kod za prijavu"}</Text>
       </Pressable>
     </View>
   );
