@@ -574,6 +574,20 @@ tražio da se zapamte jer bi se mogli ponoviti.
     push-a i pusti da PRAVI Vercel cloud deploy bude konačni test, umjesto
     daljnjeg lova na CLI-only artefakt.
 
+    **✅ Potvrđeno nakon push-a: pravi Vercel deploy je uspio** (`vercel ls`
+    → `● Ready`, build trajao 2min) - hipoteza o CLI-only artefaktu bila je
+    točna, stvarni cloud pipeline nije pogođen. Živi URL:
+    `https://fleet-manager-web-branimir-s-projects1.vercel.app`.
+    Napomena: `/login` i `/portal/login` trenutno vraćaju 302 na
+    `vercel.com/sso-api` - to je Vercel-ov vlastiti **Deployment
+    Protection (SSO)**, projekt-level postavka koja traži da SVAKI
+    posjetitelj (uklj. buduće klijente/vlasnika) bude prijavljen na
+    Vercelov tim prije nego vidi ijednu stranicu. Nije aplikacijski bug -
+    ako stranica treba biti javno dostupna (a hoće, klijenti nisu na
+    Vercel timu), treba je isključiti u Vercel dashboardu: Project Settings
+    → Deployment Protection. Nije dirano ovom sesijom (project-setting
+    odluka, izvan dosega "popravi build" zadatka).
+
 ---
 
 ## 3. Arhitektonske odluke i zašto
