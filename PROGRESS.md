@@ -662,7 +662,25 @@ tražio da se zapamte jer bi se mogli ponoviti.
     `vercel logs <deployment-host>` (runtime function invocation logovi) -
     ova razlika je izgubila vrijeme prije nego je pronađen pravi log izvor.
 
----
+    **Prvi fix (samo `binaryTargets` u schema.prisma) NIJE bio dovoljan -
+    ista greška se ponovila na sljedećem deployu.** Uzrok: `pnpm install`
+    na Vercelu je "Already up to date" (lockfile/package.json nepromijenjen
+    otkad je postinstall prvi put dodan bug #20-om), pa se `postinstall`
+    hook uopće nije ponovno pokrenuo - Prisma Client je ostao generiran sa
+    STAROM shemom (bez rhel targeta), unatoč tome što je schema.prisma
+    promijenjena i push-ana. `vercel inspect --logs` na najnoviji deploy to
+    je potvrdio - build log uopće ne spominje "prisma"/"postinstall".
+    **Pravi fix:** `"build": "prisma generate"` dodan u
+    `packages/api/package.json` (uz postojeći `postinstall`, koji ostaje
+    koristan za lokalni dev). Turbo-ov `build` task već ima `dependsOn:
+    ["^build"]` u `turbo.json`, pa `@rent-a-car/web:build` sad UVIJEK prvo
+    pokrene `@rent-a-car/api:build` (`prisma generate`) kao dio pravog
+    turbo task grafa - cache-key uključuje `schema.prisma` kao input, pa se
+    pouzdano re-generira na svaku promjenu sheme, neovisno o tome je li
+    `pnpm install` cache-iran/preskočen. Potvrđeno lokalno (`pnpm turbo run
+    build --filter=@rent-a-car/web` - `@rent-a-car/api:build` izvršen prije
+    `@rent-a-car/web:build`, oba "cache miss, executing" na prvi pokušaj sa
+    izmijenjenom shemom).
 
 ## 3. Arhitektonske odluke i zašto
 
