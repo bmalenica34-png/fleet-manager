@@ -471,12 +471,108 @@ tražio da se zapamte jer bi se mogli ponoviti.
     `C:\android-cmake\` (ručno sastavljen CMake+ninja, izvan Android SDK-a),
     `C:\v\` (pnpm virtual store), `apps/mobile/android/local.properties`
     (sadrži apsolutni `sdk.dir` i `cmake.dir`, inače gitignored/machine-
-    specific po konvenciji, ali ovaj projekt nije git repo pa trenutno
-    fizički postoji na disku). Ako se `apps/mobile/android` ikad regenerira
+    specific po konvenciji - vidi bug #20, projekt je od sljedeće sesije
+    pravi git repo pa se ovo stvarno poštuje). Ako se `apps/mobile/android` ikad regenerira
     kroz `expo prebuild --clean`, `local.properties` će vjerojatno biti
     prepisan/izbrisan - treba ga ponovno kreirati s `cmake.dir=C:\\android-cmake`.
     Isto ako se `node_modules` ikad instalira bez `--virtual-store-dir
     "C:/v"` flaga, path-length bug #3 (gesture-handler) se vraća.
+
+19. **Prije prvog deploya: git repo nije postojao.** `git init` u repo
+    rootu, provjereno da `.gitignore` (root, već postojao) pokriva sve
+    `.env` varijante na svim razinama monorepoa preko golog `.env` patterna
+    (bez leading slasha - matcha na svakoj razini), i da postojeći
+    `apps/mobile/.gitignore` (iz izvornog Expo scaffolda) već isključuje
+    CIJELI `apps/mobile/android/` kao generirani folder - to je usput
+    pokrilo i `local.properties` (SDK/cmake putanje) i ~3.6GB native build
+    artefakata (APK, `.cxx`, `.gradle`) nakupljenih tijekom bugova #18-a,
+    koji bi inače završili u prvom commitu. Prvi commit: 132 fajla, nula
+    `.env` fajlova (samo `.env.example` placeholder), `git status` vizualno
+    potvrđen prije commita. Push na GitHub NIJE rađen ovom sesijom -
+    korisnik je ručno kreirao GitHub repo i sam ga povezao/pushao prije
+    sljedeće sesije (Vercel projekt `fleet-manager-web` je već imao
+    connected `bmalenica34-png/fleet-manager` repo i failed deploy kad je
+    sljedeći bug prijavljen).
+
+20. ⚠️ **Prvi Vercel deploy pukao na "turbo run build" - lanac od tri
+    stvarna uzroka + jedan poznati CLI artefakt, riješeno kroz lokalnu
+    reprodukciju preko `vercel build`.** Vercel dashboard log je pokazivao
+    samo "Command 'turbo run build' exited with 1" bez detalja - trebalo je
+    `npx vercel login` (OAuth device flow, korisnikova autorizacija u
+    browseru) → `npx vercel link` → `npx vercel build` da se dobije puni
+    output.
+
+    **Usputna greška prije stvarnog posla:** `vercel link --project
+    fleet-manager` (ime koje je korisnik naveo) nije pronašao postojeći
+    projekt nego je STVORIO NOVI, prazan projekt "fleet-manager" (spojen na
+    isti GitHub repo - rizik dupliciranih deploy-a na push). Pravi projekt
+    s failed deploy-em zvao se `fleet-manager-web` (Root Directory
+    `apps/web`, Node.js framework Next.js, potvrđeno `vercel project
+    inspect`). Re-linkano na ispravan projekt. Prazan "fleet-manager"
+    projekt NIJE obrisan (destruktivna akcija na tuđem računu, korisnik
+    nije potvrdio) - treba ga ručno obrisati preko dashboarda ili
+    `vercel project rm fleet-manager` ako se ne koristi.
+
+    **Uzrok #1: Prisma Client se nikad nije generirao.** `@prisma/client`-ov
+    ugrađeni postinstall hook pokušava auto-naći shemu na default lokaciji
+    relativno na svoju vlastitu poziciju u `node_modules`, ne nalazi
+    `packages/api/prisma/schema.prisma` (monorepo, shema nije u rootu),
+    ispiše samo warning ("We could not find your Prisma schema in the
+    default locations") i preskoči generiranje BEZ da padne install -
+    zato je `pnpm install` uvijek "prošao čisto" dok je build kasnije pucao
+    na `Module not found: Can't resolve '.prisma/client/default'`.
+    **Fix:** eksplicitan `"postinstall": "prisma generate"` dodan u
+    `packages/api/package.json` (radi bez ikakve pnpm `allowBuilds`
+    dozvole - pnpm-ov script-ignoring security mehanizam gata samo
+    third-party pakete u `node_modules`, ne workspace-ov vlastiti paket).
+
+    **Uzrok #2: implicit `any` TypeScript greške u `packages/api/src/server/`
+    koje lokalni `tsc --noEmit` prije nije uhvatio** (vjerojatno jer je taj
+    check prošao protiv starog, cache-anog Prisma Client-a iz ranije
+    sesije, prije nego je jučerašnje čišćenje `node_modules` za mobile
+    Windows debugging prisililo svježu regeneraciju). Next.js-ov ugrađeni
+    type-check (dio `next build`) je stroži/drugačiji od golog `tsc
+    --noEmit` poziva i uhvatio je stvarne, prije neotkrivene bugove:
+    `.map()` callback parametri nad nizovima izvedenim iz Prisma query
+    rezultata (`duplicates.map((d) => ...)`, `contracts.map(({ annexes,
+    photoRequests, ...contract }) => ...)`, `contract.handoverPhotos.map(
+    async (photo) => ...)`, `vehicle.images.map((image) => ...)`) su
+    dobivali implicit `any` bez eksplicitne anotacije. **Fix:** eksplicitni
+    tipovi na svih 6 mjesta (`auth.ts`, `contracts.ts` x2, `documents.ts`,
+    `vehicles.ts` x2) - uvezen odgovarajući Prisma model tip (`Client`,
+    `HandoverPhoto`, `VehicleImage`) ili `(typeof niz)[number]` gdje je tip
+    lokalno inferiran (kompleksni `include`-bazirani Prisma payload).
+
+    **Uzrok #3: Vercel projekt nije imao NIJEDNU app env varijablu
+    postavljenu** (`vercel pull --environment production` je pokazao samo
+    Vercelove sistemske vars - `VERCEL_*`, `TURBO_*` - ništa od
+    `DATABASE_URL`/Supabase/Hetzner/Resend/signing-cron secreta). **Fix:**
+    svih 18 varijabli iz root `.env` postavljeno preko `vercel env add
+    <NAME> <environment>` (vrijednost cijevljena preko stdina, ne kao CLI
+    argument - ne završava u process listi/historyju) za `production` I
+    `preview` okruženje. `NEXT_PUBLIC_OWNER_APP_URL` i
+    `NEXT_PUBLIC_CLIENT_SIGNING_BASE_URL` NISU kopirani s lokalne
+    `localhost:3000` vrijednosti nego postavljeni na stvarni Vercel URL
+    (`https://fleet-manager-web-branimir-s-projects1.vercel.app`) -
+    korisnik treba ažurirati ako/kad doda custom domenu, inače magic-link
+    mailovi u produkciji vode na krivi URL.
+
+    **Preostali, NEriješeni artefakt (nije naš bug):** `vercel build` i
+    dalje puca s `"Unable to find lambda for route: /portal/login"` NAKON
+    što je `next build` sam potpuno čisto prošao (svi route manifesti
+    ispravni, nula compile grešaka - potvrđeno dvaput, i bez i sa pravim
+    env varijablama). Istraženo: nije duplicate ruta, nije `vercel.json`
+    "routes" override (projekt ima samo "crons" ključ), nije middleware-
+    specifično (`/login`, isto statična ruta pod middlewareom, prolazi bez
+    problema). Web istraga potvrdila da je "Unable to find lambda for
+    route" **poznat, generički Vercel CLI bug** koji pogađa nepovezane rute
+    u desetcima nepovezanih projekata (`/favicon.ico`, `/en`, `/index`,
+    `/recommend`...) kroz razne Next.js verzije - specifičan za lokalni
+    `vercel build` → `vercel deploy --prebuilt` dvokoračni CLI put, ne za
+    stvarni cloud build pipeline (zajednica potvrđuje da pravi deploy-i
+    prolaze unatoč ovome). **Nije dalje popravljano** - odluka da se
+    push-a i pusti da PRAVI Vercel cloud deploy bude konačni test, umjesto
+    daljnjeg lova na CLI-only artefakt.
 
 ---
 

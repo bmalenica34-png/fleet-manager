@@ -60,7 +60,7 @@ export async function linkGuestClientsToUser(userId: string, email: string): Pro
 
   if (duplicates.length > 0) {
     await prisma.contract.updateMany({
-      where: { clientId: { in: duplicates.map((d) => d.id) } },
+      where: { clientId: { in: duplicates.map((d: Client) => d.id) } },
       data: { clientId: primary.id },
     });
   }

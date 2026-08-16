@@ -33,7 +33,7 @@ async function toVehicleDTO(
       ? getPresignedDownloadUrl(vehicle.insurancePolicyKey)
       : Promise.resolve(null),
     Promise.all(
-      vehicle.images.map(async (image) => ({
+      vehicle.images.map(async (image: VehicleImage) => ({
         id: image.id,
         url: await getPresignedDownloadUrl(image.key),
       }))
@@ -101,7 +101,7 @@ export async function deleteVehicle(id: string): Promise<void> {
   if (!vehicle) return;
 
   await Promise.all([
-    ...vehicle.images.map((image) => deleteObject(image.key)),
+    ...vehicle.images.map((image: VehicleImage) => deleteObject(image.key)),
     vehicle.registrationDocKey ? deleteObject(vehicle.registrationDocKey) : Promise.resolve(),
     vehicle.insurancePolicyKey ? deleteObject(vehicle.insurancePolicyKey) : Promise.resolve(),
   ]);

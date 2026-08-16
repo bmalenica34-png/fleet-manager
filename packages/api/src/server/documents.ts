@@ -1,3 +1,4 @@
+import type { HandoverPhoto } from "@prisma/client";
 import { prisma } from "../db/client";
 import { getPresignedDownloadUrl, uploadObject, buildObjectKey } from "../storage/hetzner";
 import { sendSignedContractDocumentsEmail } from "../lib/email";
@@ -35,7 +36,7 @@ export async function finalizeContractDocuments(contractId: string): Promise<voi
   const [signatureUrl, photoUrls] = await Promise.all([
     getPresignedDownloadUrl(contract.signatureKey, 3600),
     Promise.all(
-      contract.handoverPhotos.map(async (photo) => ({
+      contract.handoverPhotos.map(async (photo: HandoverPhoto) => ({
         angle: photo.angle,
         url: await getPresignedDownloadUrl(photo.key, 3600),
         damageDescription: photo.damageDescription,

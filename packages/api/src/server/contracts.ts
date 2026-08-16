@@ -48,13 +48,16 @@ export async function listContractsWithAnnexSummary(): Promise<
     orderBy: { createdAt: "desc" },
   });
 
-  return contracts.map(({ annexes, photoRequests, ...contract }) => ({
-    ...contract,
-    latestAnnex: annexes[0] ? { status: annexes[0].status, newDateTo: annexes[0].newDateTo } : null,
-    latestPhotoRequest: photoRequests[0]
-      ? { requestedAt: photoRequests[0].requestedAt, fulfilledAt: photoRequests[0].fulfilledAt }
-      : null,
-  }));
+  return contracts.map((c: (typeof contracts)[number]) => {
+    const { annexes, photoRequests, ...contract } = c;
+    return {
+      ...contract,
+      latestAnnex: annexes[0] ? { status: annexes[0].status, newDateTo: annexes[0].newDateTo } : null,
+      latestPhotoRequest: photoRequests[0]
+        ? { requestedAt: photoRequests[0].requestedAt, fulfilledAt: photoRequests[0].fulfilledAt }
+        : null,
+    };
+  });
 }
 
 export async function getContract(id: string): Promise<ContractWithRelations | null> {
@@ -108,15 +111,16 @@ export async function listContractsForClientUser(userId: string): Promise<Contra
   });
 
   return Promise.all(
-    contracts.map(({ annexes, photoRequests, ...contract }) =>
-      withDocumentUrls({
+    contracts.map((c: (typeof contracts)[number]) => {
+      const { annexes, photoRequests, ...contract } = c;
+      return withDocumentUrls({
         ...contract,
         latestAnnex: annexes[0] ? { status: annexes[0].status, newDateTo: annexes[0].newDateTo } : null,
         latestPhotoRequest: photoRequests[0]
           ? { requestedAt: photoRequests[0].requestedAt, fulfilledAt: photoRequests[0].fulfilledAt }
           : null,
-      })
-    )
+      });
+    })
   );
 }
 
