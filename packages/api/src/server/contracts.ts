@@ -144,6 +144,13 @@ export async function createContractAndSendSigningEmail(
       dateFrom: input.dateFrom,
       dateTo: input.dateTo,
       status: "draft",
+      pickupLocation: input.pickupLocation,
+      returnLocation: input.returnLocation,
+      odometerStart: input.odometerStart,
+      odometerEnd: input.odometerEnd,
+      pricePerDay: input.pricePerDay,
+      excessAmount: input.excessAmount,
+      paymentMethod: input.paymentMethod,
     },
   });
 

@@ -1,44 +1,49 @@
-import { useEffect, useState } from "react";
-import { ActivityIndicator, Pressable, StyleSheet, Text, View } from "react-native";
+import { Pressable, StyleSheet, Text, View } from "react-native";
+import { useRouter } from "expo-router";
 import { useAuth } from "../../src/lib/auth-context";
-import { apiFetch } from "../../src/lib/api";
 
 export default function OwnerHome() {
+  const router = useRouter();
   const { session, signOut } = useAuth();
-  const [vehicleCount, setVehicleCount] = useState<number | null>(null);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    apiFetch<unknown[]>("/api/vehicles")
-      .then((vehicles) => setVehicleCount(vehicles.length))
-      .catch((err) => setError(err instanceof Error ? err.message : "Greška"));
-  }, []);
 
   return (
     <View style={styles.container}>
-      <Text style={styles.title}>Dobrodošao/la, vlasniče</Text>
-      <Text style={styles.body}>{session?.user.email}</Text>
+      <View>
+        <Text style={styles.title}>Rent-a-Car Manager</Text>
+        <Text style={styles.body}>{session?.user.email}</Text>
+      </View>
 
-      {error ? (
-        <Text style={styles.error}>Vozila: greška ({error})</Text>
-      ) : vehicleCount === null ? (
-        <ActivityIndicator />
-      ) : (
-        <Text style={styles.body}>Vozila u floti: {vehicleCount}</Text>
-      )}
+      <View style={styles.menu}>
+        <Pressable style={styles.menuButton} onPress={() => router.push("/owner/vehicles")}>
+          <Text style={styles.menuText}>Vozila</Text>
+        </Pressable>
+        <Pressable style={styles.menuButton} onPress={() => router.push("/owner/clients")}>
+          <Text style={styles.menuText}>Klijenti</Text>
+        </Pressable>
+        <Pressable style={styles.menuButton} onPress={() => router.push("/owner/contracts")}>
+          <Text style={styles.menuText}>Ugovori</Text>
+        </Pressable>
+      </View>
 
-      <Pressable style={styles.button} onPress={signOut}>
-        <Text style={styles.buttonText}>Odjava</Text>
+      <Pressable style={styles.signOutButton} onPress={signOut}>
+        <Text style={styles.signOutText}>Odjava</Text>
       </Pressable>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, justifyContent: "center", padding: 24, gap: 16 },
+  container: { flex: 1, justifyContent: "center", padding: 24, gap: 24 },
   title: { fontSize: 22, fontWeight: "600", textAlign: "center" },
-  body: { fontSize: 16, textAlign: "center", color: "#444" },
-  error: { fontSize: 16, textAlign: "center", color: "#c00" },
-  button: { backgroundColor: "#111", padding: 14, borderRadius: 8, alignItems: "center" },
-  buttonText: { color: "#fff", fontWeight: "600" },
+  body: { fontSize: 16, textAlign: "center", color: "#444", marginTop: 4 },
+  menu: { gap: 12 },
+  menuButton: {
+    backgroundColor: "#111",
+    padding: 16,
+    borderRadius: 8,
+    alignItems: "center",
+  },
+  menuText: { color: "#fff", fontWeight: "600", fontSize: 16 },
+  signOutButton: { padding: 12, alignItems: "center" },
+  signOutText: { color: "#444" },
 });

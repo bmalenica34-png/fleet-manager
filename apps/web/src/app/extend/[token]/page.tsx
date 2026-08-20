@@ -3,16 +3,13 @@
 import { useEffect, useRef, useState } from "react";
 import { useParams } from "next/navigation";
 import SignatureCanvas from "react-signature-canvas";
+import { formatDateHr as formatDate } from "@rent-a-car/api";
 
 interface AnnexSummary {
   currentDateTo: string;
   proposedNewDateTo: string;
   vehicle: { make: string; model: string; licensePlate: string };
   client: { firstName: string; lastName: string };
-}
-
-function formatDate(value: string): string {
-  return new Date(value).toLocaleDateString("hr-HR");
 }
 
 function toDateInputValue(value: string): string {

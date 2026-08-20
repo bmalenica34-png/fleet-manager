@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { completeSigning, resolveSigningContract } from "@rent-a-car/api/server";
-import type { PhotoAngle } from "@rent-a-car/api";
+import { vehiclePartSchema, type PhotoAngle, type VehiclePart } from "@rent-a-car/api";
 
 export const runtime = "nodejs";
 
@@ -46,6 +46,9 @@ export async function POST(
   const formData = await request.formData();
 
   const phone = formData.get("phone");
+  const address = formData.get("address");
+  const termsAccepted = formData.get("termsAccepted");
+  const termsVersion = formData.get("termsVersion");
   const driverLicenseFile = formData.get("driverLicense");
   const idDocumentFile = formData.get("idDocument");
   const signatureDataUrl = formData.get("signature");
@@ -60,10 +63,15 @@ export async function POST(
     return NextResponse.json({ error: "missing_fields" }, { status: 400 });
   }
 
+  if (termsAccepted !== "true" || typeof termsVersion !== "string" || !termsVersion.trim()) {
+    return NextResponse.json({ error: "terms_not_accepted" }, { status: 400 });
+  }
+
   const photos: {
     angle: PhotoAngle;
     file: { buffer: Buffer; contentType: string; filename: string };
     damageDescription?: string;
+    damagedPart?: VehiclePart;
   }[] = [];
 
   for (const angle of REQUIRED_ANGLES) {
@@ -83,6 +91,40 @@ export async function POST(
     });
   }
 
+  // Dodatne slike prijavljenih oštećenja (odvojeno od 4 obavezna kuta) -
+  // dinamički broj, indeksirani formData ključevi (damage_${i}_part/photo/
+  // description) jer broj oštećenja nije fiksan.
+  const damageCountRaw = formData.get("damageCount");
+  const damageCount =
+    typeof damageCountRaw === "string" && /^\d+$/.test(damageCountRaw)
+      ? parseInt(damageCountRaw, 10)
+      : 0;
+
+  for (let i = 0; i < damageCount; i++) {
+    const partRaw = formData.get(`damage_${i}_part`);
+    const photoFile = formData.get(`damage_${i}_photo`);
+    const description = formData.get(`damage_${i}_description`);
+
+    const parsedPart = vehiclePartSchema.safeParse(partRaw);
+    if (!parsedPart.success) {
+      return NextResponse.json({ error: "invalid_damage_part", index: i }, { status: 400 });
+    }
+    if (!(photoFile instanceof File)) {
+      return NextResponse.json({ error: "missing_damage_photo", index: i }, { status: 400 });
+    }
+
+    photos.push({
+      angle: "other",
+      file: {
+        buffer: Buffer.from(await photoFile.arrayBuffer()),
+        contentType: photoFile.type || "image/jpeg",
+        filename: photoFile.name,
+      },
+      damageDescription: typeof description === "string" && description.trim() ? description.trim() : undefined,
+      damagedPart: parsedPart.data,
+    });
+  }
+
   const base64 = signatureDataUrl.split(",")[1];
   if (!base64) {
     return NextResponse.json({ error: "invalid_signature" }, { status: 400 });
@@ -90,6 +132,8 @@ export async function POST(
 
   const result = await completeSigning(params.token, {
     phone: phone.trim(),
+    address: typeof address === "string" && address.trim() ? address.trim() : undefined,
+    termsVersion,
     driverLicense: {
       buffer: Buffer.from(await driverLicenseFile.arrayBuffer()),
       contentType: driverLicenseFile.type || "application/octet-stream",

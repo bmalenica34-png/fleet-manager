@@ -1,0 +1,36 @@
+{
+  "cli": {
+    "version": ">= 22.0.0",
+    "appVersionSource": "remote"
+  },
+  "build": {
+    "development": {
+      "developmentClient": true,
+      "distribution": "internal",
+      "env": {
+        "EXPO_PUBLIC_SUPABASE_URL": "https://xjlvlrrodrlriiiqeccf.supabase.co",
+        "EXPO_PUBLIC_SUPABASE_ANON_KEY": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InhqbHZscnJvZHJscmlpaXFlY2NmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODY3MDU3MjcsImV4cCI6MjEwMjI4MTcyN30.dBhVfD-jwwz1DHWKZkWi-cVz1poH7si-ncOm3Y6a3CY",
+        "EXPO_PUBLIC_API_BASE_URL": "https://fleet-manager-web-branimir-s-projects1.vercel.app"
+      }
+    },
+    "preview": {
+      "distribution": "internal",
+      "env": {
+        "EXPO_PUBLIC_SUPABASE_URL": "https://xjlvlrrodrlriiiqeccf.supabase.co",
+        "EXPO_PUBLIC_SUPABASE_ANON_KEY": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InhqbHZscnJvZHJscmlpaXFlY2NmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODY3MDU3MjcsImV4cCI6MjEwMjI4MTcyN30.dBhVfD-jwwz1DHWKZkWi-cVz1poH7si-ncOm3Y6a3CY",
+        "EXPO_PUBLIC_API_BASE_URL": "https://fleet-manager-web-branimir-s-projects1.vercel.app"
+      }
+    },
+    "production": {
+      "autoIncrement": true,
+      "env": {
+        "EXPO_PUBLIC_SUPABASE_URL": "https://xjlvlrrodrlriiiqeccf.supabase.co",
+        "EXPO_PUBLIC_SUPABASE_ANON_KEY": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InhqbHZscnJvZHJscmlpaXFlY2NmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODY3MDU3MjcsImV4cCI6MjEwMjI4MTcyN30.dBhVfD-jwwz1DHWKZkWi-cVz1poH7si-ncOm3Y6a3CY",
+        "EXPO_PUBLIC_API_BASE_URL": "https://fleet-manager-web-branimir-s-projects1.vercel.app"
+      }
+    }
+  },
+  "submit": {
+    "production": {}
+  }
+}

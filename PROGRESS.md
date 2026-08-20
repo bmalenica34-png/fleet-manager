@@ -4,12 +4,58 @@ Dinamički log stanja projekta. Ažurira se na kraju svake sesije. Za statičnu
 arhitekturu/konvencije vidi [CLAUDE.md](CLAUDE.md) — ovaj dokument je "što je
 gotovo i zašto", ne "kako treba izgledati".
 
-**Zadnje ažurirano:** 2026-08-16, sesija koja je popravila Vercel deploy
-(bug #20), prebacila mobile na produkcijski backend (bug #21), i završila
-modul 7 fazu 1 (mobile auth) prebacivanjem na OTP kod nakon što se magic-
-link deep link pokazao nepouzdanim (bug #28) — **potvrđeno live-testirano
-na uređaju, radi.** Nastavak sesije koja je pokrila module 1-6 +
-registracije/police osiguranja + modul 8.
+**Zadnje ažurirano:** 2026-08-20, nastavak iste sesije - četiri odvojena
+zadatka. (1) Potvrđeno i popravljeno: `pricePerDay` je sad stvarno obavezno
+polje (pozitivan broj) na kreiranju ugovora, i na webu i na mobileu -
+mobile input za `pricePerDay`/`excessAmount`/`paymentMethod`/`pickupLocation`/
+`odometerStart` uopće nije postojao prije ove sesije, dodan. (2) Bug #35 -
+prvi EAS cloud preview build se rušio na pokretanju jer `apps/mobile/.env`
+(gitignored) nije dostupan cloud build VM-u; fix je `env` blok u sva tri
+`eas.json` profila, potvrđen novim buildom. (3) Vehicle detail ekran
+(`/vehicles/[id]` web, `owner/vehicles/[id].tsx` mobile) restrukturiran u
+kartice/tabove (Podaci o vozilu / Dokumenti / Slike vozila / Servisna
+knjižica-placeholder / Ugovori), na oba app-a podjednako - vidi modul 2
+dodatak niže. Nova "Ugovori" kartica uvela je pravu potrebu za čitljivim
+brojem ugovora: dodan `Contract.number` (autoincrement Int, odvojen od cuid
+`id`-a), migracija je retroaktivno numerirala svih 16 postojećih test
+ugovora po `createdAt` redoslijedu (potvrđeno upitom, brojevi 1-16 čisto
+uzlazno) - PDF-ovi (Contract/Protocol/Annex) i UI popisi sad prikazuju
+`number` umjesto sirovog `id`-a. (4) Bug #36 - `.angle-grid` CSS (4 kuta
+slikanja vozila u signing/photo-request wizardu) nije imao responsive
+breakpoint, uvijek 2 kolone čak i na uskim mobilnim širinama - dodan
+`@media (max-width: 640px)` u `globals.css`, potvrđeno računanjem stvarnog
+`getComputedStyle` u Browser Paneu (375px → 1 kolona, 1280px → 2 kolone
+nepromijenjeno). (5) Dijagnoza (BEZ promjene koda, korisnik eksplicitno
+tražio uzrok prije ikakve promjene) prijavljenog "ugovor se ne šalje
+mailom" - vidi poznato ograničenje #9 dodatak, zaključak: DB pokazuje da je
+mail flow stvarno uspio (status `sent`, valjan nepotpisan token), uzrok je
+potvrđeno isti dijeljeni owner/client testni email, NE stvaran bug.
+Verifikacija za (1)-(4): `tsc --noEmit` čist na sva tri paketa, `next
+build` uspješan, `expo export` čist, migracija primijenjena i backfill
+potvrđen upitom nad produkcijskom bazom, CSS fix vizualno potvrđen u
+Browser Paneu preko stvarnog (nepotpisanog, još valjanog) signing tokena iz
+baze. Owner-auth-zaštićene stranice (vehicle detail tabovi) nisu testirane
+kroz pravi login klik ovom sesijom - isti razlog kao prijašnje sesije
+(PKCE/magic-link browser test trošio previše vremena, standardna
+typecheck+build+bundle verifikacija prihvaćena kao dovoljna za ovaj tip
+promjene).
+
+Prijašnja sesija: redizajn Contract PDF-a po uzoru na stvaran referentni
+ugovor (korisnikov postojeći taxi/rent-a-car dokument, korišten samo za
+layout/format polja, podaci klijenta iz njega nisu nigdje reproducirani) +
+novi scroll-to-accept korak za uvjete najma u signing wizardu. Novo:
+`Client.address`, `Contract.pickupLocation/returnLocation/odometerStart/
+odometerEnd/pricePerDay/excessAmount/paymentMethod/termsAcceptedAt/
+termsVersion` (svi nullable, migracija primijenjena), novi `COMPANY_*` env
+vars za PDF zaglavlje. Usput otkriven i popravljen bug #34 - react-pdf-ov
+default font briše č/ć (šire nego ranije dokumentirani "samo đ" bug #12),
+popravljeno embeddanim PT Sans fontom, primijenjeno globalno pa je fix
+pokrio i Protocol/Annex PDF-ove. Prije toga: Tier 1 backlog (padajući
+izbornici marka/model/godina, brzi odabir početka najma, auto-računanje
+datuma povrata, `DD.MM.GGGG.` format svugdje - vidi modul 2 sekciju), i
+prije toga moduli 1-6, 8, registracije/police osiguranja, modul 7 (mobile,
+obje faze), modul 3 dodaci (portret upload fix + prijava oštećenja,
+bugovi #30-#32).
 
 ---
 
@@ -33,7 +79,7 @@ već logiku"). Modul 7 (mobile) je **jedino što ostaje**.
 | 6 | Auth sloj (Supabase) + client-web | ✅ gotovo, testirano uživo (uklj. pravi magic-link klik) |
 | — | Registracija vozila + polica osiguranja (ad-hoc) | ✅ gotovo, testirano uživo |
 | 8 | Photo request flow | ✅ gotovo, testirano uživo |
-| 7 | Mobile appovi (owner-mobile, client-mobile) | 🔶 **Faza 1 (auth + skeleton) gotova, testirano uživo na uređaju — radi** |
+| 7 | Mobile appovi (owner-mobile, client-mobile) | 🔶 **Faza 1 (auth + skeleton) gotova, testirano uživo na uređaju. Faza 2 (owner-mobile feature ekrani) kodno gotova, čeka live test na uređaju** |
 
 Svaki modul označen "testirano uživo" je stvarno proveden kroz browser
 (Claude Browser Pane) ili direktnim HTTP pozivima na dev server, ne samo
@@ -63,11 +109,98 @@ drži File objekt + `URL.createObjectURL` preview dok korisnik ne klikne
 "Spremi" — vidi bug #4). Kreiranje ugovora generira 48h JWT signing token i
 šalje mail klijentu.
 
+**Naknadna sesija — UX brzina unosa (backlog Tier 1, vidi sekciju 7):**
+- Marka/model/godina na formi vozila (`/vehicles/new`, `/vehicles/[id]`) su
+  sad padajući izbornici umjesto slobodnog teksta - statička lista
+  (`packages/api/src/data/vehicleCatalog.ts`, `VEHICLE_MAKES` +
+  `VEHICLE_MODELS_BY_MAKE`, ~32 marke, po 5-10 modela svaka, fokus na
+  vozila realna za HR/EU rent-a-car flotu). Model-popis se cascadira po
+  odabranoj marki. "Ostalo" opcija na oba (marka i model, neovisno) otvara
+  slobodni tekstualni unos - nužno jer statička lista nikad neće pokriti
+  baš svaki slučaj, i da postojeći uneseni podaci (prije ove promjene) ne
+  budu izgubljeni ako ne postoje na listi (edit forma to detektira i pada
+  natrag na custom način automatski).
+- Kreiranje ugovora (`/contracts/new`): početak najma preko "Danas"/
+  "Sutra"/"Custom" brzih gumba (Custom otkriva native `type=date` input),
+  umjesto uvijek ručnog upisa. Datum povrata više nije ručni input - novi
+  "Trajanje najma (broj dana)" numerički input automatski računa i
+  prikazuje datum povrata (read-only, `formatDateHr`). Submit i dalje šalje
+  ISO `dateFrom`/`dateTo` na nepromijenjeni `/api/contracts` endpoint - cijela
+  promjena je čisto na UI razini.
+- **Svi datumi koje korisnik VIDI (ne unosi preko native pickera) su sad
+  striktno `DD.MM.GGGG.` format** (hrvatski standard, s točkom na kraju) -
+  novi `formatDateHr`/`parseHrDateToIso`/`isoToHrDate` helperi u
+  `packages/api/src/lib/dateFormat.ts`, dijeljeni između weba i mobilea
+  (čista logika, bez server ovisnosti - isti obrazac kao zod scheme).
+  Namjerno NE koristi `Intl`/`toLocaleDateString("hr-HR")` jer taj default
+  ubacuje razmake ("19. 08. 2026.", CLDR hr-HR konvencija) - korisnik je
+  eksplicitno tražio bez razmaka. Native `<input type="date">` na webu
+  ostaje netaknut (HTML5 spec zahtijeva ISO vrijednost, browser sam
+  lokalizira vizualni prikaz pickera - nije nešto što aplikacija kontrolira
+  niti treba mijenjati). Mobile GGGG-MM-DD tekstualni inputi (dokumentirano
+  ograničenje - nema native date pickera, vidi modul 7 fazu 1) zamijenjeni
+  DD.MM.GGGG. formatom + `parseHrDateToIso` validacijom i jasnom porukom
+  na krivi unos.
+
+**Naknadna sesija — vehicle detail ekran restrukturiran u kartice (tabove).**
+`/vehicles/[id]` (web) i `owner/vehicles/[id].tsx` (mobile) su prije bili
+jedan dugi scrollable ekran - sad su 5 kartica: "Podaci o vozilu" (postojeća
+forma, nepromijenjena), "Dokumenti" (prometna + polica, premješteno bez
+promjene logike), "Slike vozila" (galerija, premješteno), "Servisna
+knjižica" (NOVO, čist placeholder tekst "uskoro" - stvarna funkcionalnost
+je Tier 4 backlog), "Ugovori" (NOVO). Implementirano kao lokalni tab state
+(`activeTab`) + uvjetni render postojećih blokova - svi handleri/upload
+handlovi ostali su potpuno nepromijenjeni, samo je JSX omotan u
+`{activeTab === "x" && (...)}`. "Ugovori" kartica fetcha SVE ugovore
+(postojeći `/api/contracts` na webu, `listContracts()` na mobileu) i
+filtrira client-side po `vehicleId` - namjerno bez novog
+`/api/vehicles/[id]/contracts` endpointa, konzistentno s ostatkom app-a
+(nigdje se ne paginira/server-side filtrira, flota je mala). Prikazuje broj
+ugovora (`Contract.number`, vidi arhitektonsku odluku niže), datume, status,
+klijenta, i link na `contractPdfUrl` (presigned, ista URL-generacija kao
+svugdje drugdje).
+
 ### Modul 3 — Public signing flow
 `/sign/[token]`. Jednoekranski wizard: upload vozačke/osobne + telefon →
 4 obavezna kuta slikanja (front/back/left/right) + opis oštećenja po slici →
 canvas potpis → jedan finalni submit koji sve šalje odjednom (ne upload po
 koraku — izbjegava djelomično stanje u bazi). Vidi bugove #8, #9.
+
+**Naknadna sesija (nakon što je modul već bio proglašen gotovim):** bug fix
+za portret-only upload failure (bug #30) + nova funkcija prijave oštećenja
+po dijelu vozila. Vidi bug #30 i arhitektonsku odluku "Strukturirano polje
+za dio vozila" niže za detalje. Ukratko:
+- Sva 4 file inputa (vozačka, osobna, 4 obavezna kuta, sad i dodatne slike
+  oštećenja) prolaze kroz `compressImageFile()`
+  (`apps/web/src/lib/compressImage.ts`) prije nego se stave u state - canvas
+  downscale na max 1920px duljoj stranici + JPEG re-encode kvalitete 0.82,
+  prije nego korisnik uopće klikne submit.
+- Novi "Oštećenja (opcionalno)" blok u photos koraku - dinamički popis
+  (`useState<DamageEntry[]>`), svaki unos: dio vozila (select, 27 opcija),
+  slika (`capture="environment"`), opis (opcionalno). "+ Dodaj još jedno
+  oštećenje" / "Ukloni oštećenje" po unosu. `photosComplete` sad zahtijeva
+  i da je svaki započeti damage unos kompletan (dio + slika) prije "Dalje".
+  Submit šalje `damageCount` + indeksirane `damage_${i}_part/photo/
+  description` ključeve (broj oštećenja nije fiksan, za razliku od 4
+  obavezna kuta).
+
+**Sljedeća sesija — novi "terms" korak (scroll-to-accept uvjeta najma) prije
+potpisa.** `STEPS` niz: `documents → photos → terms → signature → review`.
+Scrollable box (`.terms-box`, fiksna visina 260px, `overflow-y: auto`) s
+placeholder tekstom uvjeta (8 generičkih klauzula - pravi pravni tekst
+dolazi naknadno, vidi `TERMS_VERSION`/`TERMS_TEXT` konstante u
+`sign/[token]/page.tsx`, komentar upozorava da se `TERMS_VERSION` MORA
+promijeniti kad se tekst zamijeni). `onScroll` handler otključava checkbox
+tek kad `scrollTop + clientHeight >= scrollHeight - 10` (10px tolerancija
+za zaokruživanje). "Dalje" ostaje disabled dok checkbox nije čekiran.
+Prihvaćanje se šalje kao `termsAccepted=true` + `termsVersion` u FormData;
+**server (ne klijent) postavlja `Contract.termsAcceptedAt = new Date()`**
+u `completeSigning` transakciji - pouzdaniji zapis "kad je stvarno
+primljeno" nego klijentski timestamp. `/api/sign/[token]` route odbija
+submit s `terms_not_accepted` ako `termsAccepted !== "true"`.
+Dodano usput: `address` polje na documents koraku (opcionalno, sprema se u
+`Client.address` u istoj `prisma.client.update` gdje se već ažurira
+`phone`).
 
 ### Modul 4 — PDF + storage
 `packages/api/src/pdf/` — `ContractPdf.tsx`, `ProtocolPdf.tsx`,
@@ -76,6 +209,35 @@ react-pdf komponente, vidi bug #10), `generate.tsx`, `styles.ts`,
 `format.ts`. Generira se nakon potpisa, upload na Hetzner, mail objema
 stranama s PDF prilozima. Best-effort — greška u PDF/mail koraku ne ruši
 već spremljen potpis (try/catch, `console.error`). Vidi bugove #10, #11, #12.
+
+**Naknadna sesija — redizajn Contract PDF-a po uzoru na referentni primjer
+(korisnik priložio stvarni ugovor iz vlastitog taxi/rent-a-car poslovanja
+kao format-referencu - korišten SAMO za layout/strukturu polja, stvarni
+podaci klijenta iz tog dokumenta nisu nigdje reproducirani, ni u kodu ni u
+test podacima).** Novi izgled: zaglavlje (company blok lijevo iz novih
+`COMPANY_*` env varijabli + kutija s brojem ugovora desno), "Račun za /
+Korisnik" blok (ime, adresa, OIB), tablica "Podaci o najmu" (registracija,
+vozilo, preuzimanje/povrat s datumom+vremenom+lokacijom, kilometraža
+početak/kraj, broj dana, cijena/dan, ukupno), tablica "Obračun" (ukupno,
+PDV 25%, osnovica, učešće u šteti, način plaćanja - PDV/osnovica/ukupno se
+RAČUNAJU iz `pricePerDay × broj dana`, ne spremaju se kao zasebna polja),
+dvojezični (HR/EN) blok upozorenja o pozivu policije kod nezgode, red o
+prihvaćanju uvjeta najma (vidi modul 3 dodatak), i dvostupčani potpisni
+blok. Vidi bug #34 (font) i arhitektonsku odluku "Koja polja su dodana i
+gdje se unose" za detalje o novim Contract/Client poljima.
+
+**Bug #34 otkriven usput, tijekom vizualne provjere redizajna** — react-pdf
+default Helvetica font (WinAnsi/CP1252 enkodiranje) tiho briše č/ć iz
+teksta (ima š/ž, nema č/ć/đ), šire nego što je bug #12 ranije dokumentirao
+(bug #12 je testirao samo đ). Popravljeno embeddanjem PT Sans fonta kao
+base64 data URI (`packages/api/src/pdf/fonts.ts`, `Font.register`) -
+namjerno NE kao odvojeni `.ttf` fajl na disku, da se izbjegne isti razred
+problema kao bug #23 (Next.js file tracer preskače binarne assete iz
+serverless bundlea). Primijenjeno globalno kroz `styles.ts` (svi
+`fontFamily: "Helvetica"/"Helvetica-Bold"` → `"PTSans"` + `fontWeight`), pa
+je fix automatski popravio i ProtocolPdf/AnnexPdf, ne samo Contract PDF.
+Bug #12-ova ograničenja #1 (poznata ograničenja, niže) je stoga zastarjelo
+- ažurirano.
 
 ### Modul 5 — Cron istek ugovora + anex
 `/api/cron/check-expiring` (CRON_SECRET zaštićen), dnevno u 8h UTC
@@ -190,6 +352,67 @@ telefonom/simulatorom — vidi sekciju 5):
 2. `pnpm --filter mobile start`, otvoriti u Expo Go, kliknuti pravi magic
    link, potvrditi da app landa na `owner/home` s ispravnim brojem vozila,
    da sesija preživi restart appa, i da logout radi.
+
+### Modul 7 — Faza 2: owner-mobile feature ekrani (kodno gotovo, čeka live test)
+
+Nastavak na gotov auth skeleton iz faze 1. Sve backend rute su već postojale
+(reused bez izmjena osim jednog bug fixa — vidi bug #29 niže) i rade preko
+istog Bearer-token mehanizma generaliziranog u fazi 1, pa je ovo čisto
+UI/navigacijski posao.
+
+**Novi ekrani** (`apps/mobile/app/owner/`), svi unutar postojećeg
+`owner/_layout.tsx` Stack-a (auth-gated, `headerShown: false` — svaki ekran
+ima svoj ručni "< Natrag" link, isti obrazac kao `verify-code.tsx` iz faze 1,
+umjesto native headera):
+- `home.tsx` — prepravljen iz faze-1 smoke-testa u pravi dashboard: 3 gumba
+  (Vozila/Klijenti/Ugovori) + odjava.
+- `vehicles/index.tsx` — lista vozila (`GET /api/vehicles`), tap → detalj.
+  `useFocusEffect` (re-exportiran iz `expo-router`, potvrđeno u
+  `expo-router/build/exports.js` prije upotrebe — nije direktna ovisnost
+  `@react-navigation/native` na mobileu, koja pod pnpm strict izolacijom ne
+  bi bila resolvable) osigurava refresh liste pri povratku s detalja, jer
+  Expo Router (native-stack) drži prijašnje ekrane mountane u memoriji —
+  goli `useEffect(() => {}, [])` ne bi uhvatio promjene napravljene na
+  detalju.
+- `vehicles/[id].tsx` — uređivanje podataka (marka/model/godina/tablice/VIN/
+  datum isteka registracije kao tekstualni GGGG-MM-DD unos, bez native date
+  pickera — vidi arhitektonsku odluku niže), upload prometne/police
+  osiguranja (`expo-document-picker`, `type: ["image/*", "application/pdf"]`)
+  i slika vozila (`expo-image-picker`, `launchImageLibraryAsync` s
+  `allowsMultipleSelection: true`), brisanje pojedine slike.
+- `clients/index.tsx` — lista klijenata + obrazac za dodavanje (isti
+  validacijski uvjeti kao web: OIB regex 11 znamenki client-side prije
+  submita, backend zod shema je ionako izvor istine).
+- `contracts/index.tsx` — lista ugovora s vozilom/klijentom/datumima/
+  statusom, gumb "Zatraži slike" za aktivne potpisane ugovore bez već
+  poslanog nepodmirenog zahtjeva (identična `isActive()` logika kao web
+  `contracts/page.tsx`, duplicirana lokalno).
+- `contracts/new.tsx` — kreiranje ugovora: vozilo i klijent biraju se kao
+  pressable redci u listi (nema native picker/select komponente u RN-u bez
+  dodatne ovisnosti), datumi kao GGGG-MM-DD tekstualni unos.
+
+**Nove ovisnosti:** `expo-image-picker`, `expo-document-picker` — dodane
+preko `expo install` (ne golog `pnpm add`) da se dobiju točne SDK 57
+kompatibilne verzije. Oba su službeni Expo SDK moduli **uključeni u
+precompilirani Expo Go binary** (za razliku od npr.
+`@react-native-community/datetimepicker`), pa rade odmah u Expo Go bez
+ponovnog native builda — namjerno izbjegnuto zbog cijele Windows CMake/ninja
+sage iz bugova #18-19, koja bi se ponovila za bilo koju ovisnost koja
+zahtijeva `expo prebuild`/custom dev client.
+
+**Verifikacija napravljena bez uređaja** (isti razlog kao faza 1 — Claude
+Browser Pane ne prikazuje Expo app): `tsc --noEmit` čisto na `apps/mobile`,
+`npx expo export --platform ios` uspješno izbundlao 1176 modula (raslo s
+1164 u fazi 1, očekivano s dvije nove ovisnosti + 6 novih ekrana).
+
+**Ostaje prije nego se faza 2 proglasi gotovom:** live test na uređaju —
+navigacija kroz sva 4 nova ekrana, kreiranje ugovora i provjera da mail za
+potpis stigne klijentu identično kao s weba. Upload prometne/police/slika je
+prvim live testom otkrio bug #30 (popravljeno, prebačeno na
+`expo-file-system` `File.upload()`) i usput bug #31 (tipkovnica prekrivala
+formu, popravljeno svugdje) — oba fixa su čisto JS-side i nisu zahtijevala
+novi dev-client build, ali **re-test na uređaju nakon ovih fixeva još nije
+potvrđen**.
 
 ---
 
@@ -862,6 +1085,205 @@ tražio da se zapamte jer bi se mogli ponoviti.
     iz baze (bearer-token `GET /api/vehicles` poziv) → logout. Modul 7
     Faza 1 (auth + skeleton) je time stvarno gotova, ne samo kodno.
 
+29. ⚠️ **`apiFetch` bi pokvario svaki multipart upload čim bi se prvi
+    pozvao** (otkriveno kod pisanja modula 7 faze 2, prije ijednog live
+    testa — nije bio pogođen fazom 1 jer ona nema nijedan upload poziv).
+    Postojeći kod je bezuvjetno postavljao `Content-Type: application/json`
+    čim je `init.body` postojao, bez provjere je li to tijelo zapravo
+    `FormData`. Pravi multipart zahtjev treba `Content-Type:
+    multipart/form-data; boundary=...` koji `fetch` sam generira SAMO ako
+    header nije eksplicitno postavljen - naš json header bi ga pregazio, pa
+    bi svaki upload (prometna, polica, slike vozila) server dočekao kao
+    tijelo bez ijednog fajla. **Fix:** `apps/mobile/src/lib/api.ts` `apiFetch`
+    sad provjerava `!(init.body instanceof FormData)` prije postavljanja
+    json Content-Typea.
+
+30. ⚠️ **Prvi live test na uređaju nakon rebuilda (bug #29 fix primijenjen):
+    upload police osiguranja pukao s `"Unsupported FormDataPart
+    implementation"`** (isti kod put kao prometna/slike vozila - potvrđeno
+    da bi se ponovilo za sve tri). Bug #29-ov fix (skip json Content-Typea
+    za FormData tijela) je bio ispravan, ali nedovoljan - pravi uzrok je
+    dublji: **Expo SDK 57-ov `fetch()`/`FormData` sloj na Androidu ne
+    prepoznaje RN-ov klasični `{ uri, name, type }` file-part oblik** koji
+    smo appendali (`formData.append("file", { uri, name, type })`, standardni
+    RN obrazac dokumentiran u samom `FormData.js` izvoru). Istraženo -
+    dokumentiran, otvoren Expo issue (`expo/expo#33134`) s identičnom
+    porukom, potvrđuje da je ovo poznat SDK-57-eran problem, ne greška u
+    našem kodu. Pokušaj lociranja točnog internog uzroka (je li global
+    `fetch` u ovoj SDK verziji tiho zamijenjen Expo-ovim WinterTC-
+    kompatibilnim fetch/FormData slojem umjesto RN-ovog klasičnog
+    `NetworkingModule`-a) nije dovršen - nije bilo dovoljno da se izvor
+    definitivno locira (samo `.d.ts` tipovi vidljivi u `expo/build/winter/`,
+    stvarna implementacija je native/JSI, ne JS-require-abilna).
+    **Fix (izbjegava cijelu klasu problema, umjesto lova na točan uzrok):**
+    prebačeno s `fetch()` + `FormData` na **`expo-file-system`-ov
+    `File.upload()`** za sva tri upload poziva (prometna, polica, slike
+    vozila) - taj API gradi multipart tijelo izravno u native kodu, mimo
+    fetch()-a i RN-ovog FormData mosta u potpunosti, pa je imun na ovaj
+    problem po dizajnu. **Napomena o SDK 57 promjeni** (AGENTS.md upozorenje
+    "Expo HAS CHANGED" potvrđeno na djelu): stari `FileSystem.uploadAsync()`
+    je deprecated u ovoj verziji, nova API je `new File(uri).upload(url,
+    { uploadType: UploadType.MULTIPART, fieldName, httpMethod, mimeType,
+    headers, signal })` → vraća `{ status, body, headers }` (body kao
+    string, treba ručni `JSON.parse`). Provjereno prije pisanja koda kroz
+    trenutne verzionirane docs (`docs.expo.dev/versions/v57.0.0/sdk/
+    filesystem/`), ne iz starijeg znanja.
+    - `apps/mobile/src/lib/api.ts` - novi `uploadPickedFile<T>()` helper
+      (Bearer token iz Supabase sesije, 30s timeout preko `AbortController`
+      + `signal` opcija koju `File.upload()` podržava, isti error-body
+      parsing obrazac kao `apiFetch`). `uploadVehicleRegistrationDoc`/
+      `uploadVehicleInsurancePolicy` sad pozivaju ovaj helper umjesto
+      `apiFetch` + `FormData`.
+    - `uploadVehicleImages` (multi-file) - `File.upload()` šalje samo JEDAN
+      fajl po pozivu (nema multi-file multipart u ovom API-ju). Backend
+      endpoint (`formData.getAll("files")`) već radi ispravno i s jednim
+      elementom, pa se više odabranih slika šalje kao **paralelni pozivi**
+      na isti endpoint (`Promise.all`), rezultati (svaki poziv vrati niz s
+      1 slikom) se spljošte (`flat()`) u jedan niz.
+    - `expo-file-system` dodan kao **eksplicitna** ovisnost
+      (`apps/mobile/package.json`), pinana na `57.0.2` - točno verzija koja
+      je već bila transitivno linkana u postojećem APK-u (kao ovisnost
+      `expo-image-picker`/`expo-document-picker`, vidljivo u Gradle "Using
+      expo modules" logu iz prethodnog builda). Zato ovaj fix **nije
+      zahtijevao novi `expo run:android`** - čisto JS-side promjena, native
+      kod za `expo-file-system` je već bio kompajliran u postojeći dev-
+      client. `pnpm --filter mobile add expo-file-system@57.0.2
+      --virtual-store-dir "C:/v"` korišten direktno umjesto `expo install`
+      (koji interno zove goli `pnpm add` bez našeg custom
+      `--virtual-store-dir` flaga - vidi bug #18/#19 - i puca s
+      `ERR_PNPM_UNEXPECTED_VIRTUAL_STORE`).
+
+31. **Tipkovnica prekrivala input polja i submit gumb na sva tri mobile
+    obrasca s tekstualnim unosom** (`owner/clients/index.tsx` "Novi
+    klijent", `owner/vehicles/[id].tsx` uređivanje podataka,
+    `owner/contracts/new.tsx` datumi) - nijedan nije imao
+    `KeyboardAvoidingView`, pa se sadržaj nije pomicao/skupljao kad se
+    tipkovnica otvori. Prijavljeno za "Novi klijent" formu, popravljeno
+    dosljedno na sva tri ekrana s istim obrascem (isti bug bi se inače
+    prijavio triput). **Fix:** svaki ekran omotan u
+    `KeyboardAvoidingView` (`behavior: "padding"` na iOS, `"height"` na
+    Android - standardni RN obrazac za tu platform razliku), plus
+    `keyboardShouldPersistTaps="handled"` na unutarnjem `FlatList`/
+    `ScrollView`-u (da tap na gumb odmah radi dok je tipkovnica otvorena,
+    umjesto da prvi tap samo zatvori tipkovnicu).
+
+32. ⚠️ **Upload slika vozila u `/sign/[token]` wizardu pucao ("Greška
+    prilikom slanja") kad su slike snimljene u portretu na mobitelu, radio
+    je u landscapeu.** Istražen cijeli backend put (`completeSigning`,
+    `uploadObject`) - nema nikakve orijentacije/aspect-ratio logike, uzrok
+    NIJE bio u aplikacijskom kodu. Pravi uzrok: **Vercel-ov tvrdi platform
+    limit za tijelo zahtjeva na Serverless Functions (~4.5MB) - nema
+    Next.js config koji ga zaobiđe za Route Handlere.** Jedan signing submit
+    šalje 6 slika odjednom (vozačka + osobna + 4 obavezna kuta), svaka
+    izravno iz telefonske kamere (`<input capture="environment">`), bez
+    ikakve kompresije - realne kamera-JPEG datoteke od nekoliko MB svaka
+    lako preko zbroja probiju limit. Orijentacijska korelacija koju je
+    korisnik prijavio nije bila slučajna - portret snimke preko `capture`
+    atributa su na dosta Android uređaja (dokumentiran, poznat Chromium
+    fenomen) občutno veće od landscape snimki iz iste kamere.
+    **Fix:** novi `apps/web/src/lib/compressImage.ts` - canvas-based
+    downscale (max 1920px na dužoj stranici) + JPEG re-encode (kvaliteta
+    0.82) prije nego se ijedna slika stavi u state, primijenjeno na SVE file
+    inputove u `/sign/[token]` (vozačka, osobna, 4 kuta, nove slike
+    oštećenja - vidi modul 3 sekciju). Usput normalizira i EXIF rotaciju
+    (canvas snima sliku uspravno onako kako je `<img>` element već prikazan,
+    orijentacija se "peče" u izlazni canvas). **Potvrđeno testom:** sintetička
+    12MB "portret" testna slika (3000×4000, realan omjer kao portret telefon
+    snimka) kompresirana na 1440×1920 / ~1MB prije uploada - cijeli signing
+    flow uspješno završen s 6 takvih slika u jednom submitu, i u portret i u
+    landscape (desktop) viewportu, oba puta potvrđeno u bazi (status
+    "signed", oba PDF-a generirana).
+
+33. **Bug #3 se ponovio u novom obliku - `next build` se zaglavio čitav ranije
+    bez ijedne greške, stao odmah nakon "▲ Next.js 14.2.35" bannera.**
+    Provjereno preko `Get-Process`/`Get-CimInstance` (CPU vrijeme se nije
+    pomicalo kroz 20s - proces stvarno stao, ne samo sporo radi) - pravi
+    uzrok isti kao dokumentirani bug #3 (`.next` cache konflikt kad build i
+    dev server dijele isti direktorij), samo NOVI trigger: dev server je bio
+    pokrenut preko Claude Browser Pane `preview_start` alata (ne ručno u
+    terminalu kao ranije), pa taj oblik pokretanja dosad nije bio povezan s
+    ovim gotchom u prijašnjim bilješkama. **Fix:** `preview_stop` prije
+    `pnpm turbo run build`, `rm -rf apps/web/.next`, retry - build prošao
+    čisto u 25s. **Pravilo prošireno:** provjeriti/zaustaviti SVAKI aktivni
+    dev server (uklj. Browser Pane preview), ne samo ručno pokrenute, prije
+    bilo kojeg `build` poziva.
+
+34. ⚠️ **react-pdf-ov default Helvetica font tiho briše č i ć iz teksta**
+    ("Račun" → "Raun", "Učešće" → "Ueše") - otkriveno tijekom vizualne
+    provjere redizajniranog Contract PDF-a (renderirano izravno preko
+    scratch skripte, ne kroz browser/auth - vidi napomenu o metodi
+    testiranja niže). Bug #12 je ranije dokumentirao SAMO đ kao pogođen
+    ("Č, ć, š, ž rade ispravno") - ta tvrdnja je bila netočna/nedovoljno
+    testirana; stvarni uzrok je da Helvetica u react-pdf-u koristi
+    WinAnsi/CP1252 enkodiranje, koje ima š/ž (CP1252 0x8A/0x9A/0x8E/0x9E)
+    ali NEMA č/ć/đ (ti znakovi su u Latin Extended-A, izvan CP1252 raspona).
+    **Fix:** embeddan PT Sans font (OFL licenca, google/fonts) kao base64
+    data URI u novom `packages/api/src/pdf/fonts.ts`
+    (`Font.register({family: "PTSans", fonts: [...]})`), pozvano kao
+    side-effect import (`import "./fonts"`) u `generate.tsx` prije prvog
+    rendera. Namjerno base64-embed umjesto odvojenog `.ttf` fajla na disku -
+    izbjegava rizik da Next.js-ov file tracer (`@vercel/nft`) ne prepozna
+    binarni asset i preskoči ga iz serverless bundlea (identičan razred
+    problema kao bug #23, Prisma query engine binary). `styles.ts` ažuriran
+    globalno (svih 6 mjesta `Helvetica`/`Helvetica-Bold` → `PTSans` +
+    `fontWeight`), pa fix pokriva sve PDF-ove (Contract, Protocol, Annex),
+    ne samo Contract koji je bio u fokusu ove sesije. Potvrđeno vizualno:
+    "Račun za / Korisnik", "Kilometraža - početak", "Obračun", "Učešće u
+    šteti", "Način plaćanja", "slučaju", "će biti terećena" - svi ispravno
+    prikazani nakon fixa.
+
+35. ⚠️ **Prvi EAS cloud preview build (Android) se rušio odmah pri pokretanju
+    na fizičkom uređaju** - development build (`expo run:android`) je
+    ranije radio ispravno, ovo je bio prvi standalone/preview build napravljen
+    kroz EAS. **Uzrok:** `apps/mobile/.env` (gitignored, isti obrazac kao
+    `apps/web/.env` - vidi bug #6) sadrži `EXPO_PUBLIC_SUPABASE_URL`,
+    `EXPO_PUBLIC_SUPABASE_ANON_KEY`, `EXPO_PUBLIC_API_BASE_URL`. EAS Build
+    klonira projekt na čistu cloud VM iz gita - gitignored `.env` tamo
+    jednostavno ne postoji, pa su sve tri varijable bile `undefined` u
+    buildu. `src/lib/supabase.ts` zove `createClient(process.env.
+    EXPO_PUBLIC_SUPABASE_URL!, process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY!,
+    ...)` na top-level importu - Supabase JS klijent baca `supabaseUrl is
+    required` sinkrono već pri učitavanju modula, prije ijednog ekrana,
+    što se na uređaju vidi kao trenutni crash pri pokretanju. `expo
+    run:android` (lokalni build) ovo nije pogodilo jer lokalni `.env`
+    postoji na disku. **Fix:** `env` blok dodan u sva tri `eas.json` build
+    profila (`development`, `preview`, `production` - ne samo preview, isti
+    bug bi se ponovio na prvom produkcijskom buildu da nije popravljeno
+    posvuda) sa sve tri `EXPO_PUBLIC_*` vrijednosti eksplicitno upisane.
+    Sigurno za commitati u git (eas.json nije gitignored) jer je
+    `EXPO_PUBLIC_` prefiks po Expo konvenciji namjerno "javno, ide u
+    klijentski bundle" - anon key je zaštićen Supabase RLS politikama, API
+    base URL je javni Vercel domain, oba već postoje u plain textu unutar
+    kompajliranog appa. Alternativa (EAS Environment Variables preko
+    dashboarda/`eas env:create`) razmatrana ali odbačena kao dodatna
+    pokretna komponenta bez stvarne koristi za varijable koje ionako nisu
+    tajne. **Potvrđen fix:** novi build (`eas build --platform android
+    --profile preview`) log eksplicitno ispisuje "Environment variables
+    loaded from the 'preview' build profile 'env' configuration:
+    EXPO_PUBLIC_SUPABASE_URL, EXPO_PUBLIC_SUPABASE_ANON_KEY,
+    EXPO_PUBLIC_API_BASE_URL" - ranije (bez ovog fixa) ta linija nije
+    postojala/bila prazna. Live test instalacije na uređaju NIJE proveden
+    ovom sesijom (build link poslan korisniku, instalacija/otvaranje na
+    telefonu ostaje potvrditi).
+
+36. ⚠️ **4 fiksna kuta slikanja vozila (`.angle-grid` u signing i
+    photo-request wizardu) prikazivala su se kao 2x2 grid na mobilnim
+    širinama** - korisnikov bug report s pravog uređaja. **Uzrok:**
+    `.angle-grid` u `apps/web/src/app/globals.css` je imao
+    `grid-template-columns: 1fr 1fr` bez ikakvog responsive breakpointa -
+    ta CSS klasa se dijeli između `/sign/[token]` i `/request-photos/[token]`
+    (obje su javne stranice, tipično otvorene na telefonu klikom na mail
+    link), pa je 2-kolonski layout na uskom ekranu prikazivao slike
+    prekomalo. **Fix:** `@media (max-width: 640px) { .angle-grid {
+    grid-template-columns: 1fr; } }` - jedna kolona (slike jedna ispod
+    druge) ispod 640px, nepromijenjeno iznad. Pokriva oba wizarda odjednom
+    jer klasa dolazi iz zajedničkog `globals.css`, ne treba dirati JSX ni
+    u jednoj od dvije stranice. Potvrđeno `getComputedStyle` provjerom u
+    Browser Paneu (ne punim wizard-flow testom - to bi zahtijevalo stvarne
+    slikovne fajlove za upload): 375px viewport → `gridTemplateColumns`
+    jedna vrijednost (jedna kolona), 1280px → dvije vrijednosti
+    (nepromijenjeno ponašanje na desktopu).
+
 ---
 
 ## 3. Arhitektonske odluke i zašto
@@ -938,25 +1360,119 @@ radije nego nova tablica za mali tracking problem).
 umjesto jednog kombiniranog. Razdvajanje odgovornosti, isti obrazac "jedna
 ruta = jedna briga" kao ostatak projekta.
 
+**Client-mobile feature ekrani odgođeni, owner-mobile prioritet u modulu 7.**
+Korisnikova odluka na početku faze 2. Cijeli signing/produženje/photo-request
+flow već radi bez accounta preko token-linka u mailu (moduli 3, 5, 8), a
+client-web portal već pokriva pregled za registrirane klijente (modul 6) -
+native client app nema jasnu dodatnu vrijednost dok nema stvarnih klijenata
+koji je traže. Dodatan praktičan razlog: client-facing JSON API rute za
+ugovore/dokumente/potpis ne postoje još ni za web (portal je danas
+server-rendered HTML, ne API) - client-mobile bi zahtijevao i taj backend
+posao prije UI-ja, ne samo reuse postojećih ruta kao owner-mobile faza 2.
+
+**Strukturirano polje za dio vozila (`VehiclePart` enum), odvojeno od
+`PhotoAngle`.** Korisnikov zahtjev za prijavu oštećenja tražio je "koji dio
+vozila" kao strukturiran podatak (ne slobodni tekst) radi budućeg
+filtriranja/pretraživanja. `PhotoAngle` postojeće sheme predstavlja KUT
+snimanja (front/back/left/right/interior/odometer), ne dio vozila - novi
+`VehiclePart` enum (27 vrijednosti: branici, vrata, blatobrani, ogledala,
+gume, svjetla, staklo, haube, prtljažnik, krov, unutrašnjost, ostalo) je
+namjerno odvojen koncept. Slike prijavljenog oštećenja i dalje idu kroz
+`HandoverPhoto` (isti model kao 4 obavezna kuta) s `angle: "other"` +
+`damagedPart: VehiclePart` popunjenim - nije trebao novi model, samo novo
+nullable polje (`damagedPart`, null za standardne 4 slike primopredaje).
+
+**Damage-photo broj nije fiksan, pa se ne mogu koristiti fiksni FormData
+ključevi kao za 4 obavezna kuta.** `photo_${angle}` obrazac (postojeći, za
+front/back/left/right) radi jer je skup kutova statičan i poznat unaprijed.
+Oštećenja su dinamičan popis (0 do N), pa signing wizard šalje `damageCount`
++ indeksirane `damage_${i}_part/photo/description` ključeve - backend ih
+parsira u petlji `for (let i = 0; i < damageCount; i++)`.
+
+**Gdje se unose novi Contract PDF podaci - owner pri kreiranju, klijent kod
+potpisa, "povrat" polja nigdje još.** Korisnik je tražio da se predloži
+mjesto unosa prije dodavanja polja. Odluka: `pickupLocation`,
+`odometerStart`, `pricePerDay`, `excessAmount`, `paymentMethod` su poznati
+OWNERU u trenutku kreiranja ugovora (cijena/uvjeti se dogovaraju prije
+primopredaje) - dodano u `/contracts/new` formu, opcionalno. `address` je
+realnije da OWNER ne zna unaprijed (klijent ga daje sa svojom osobnom) -
+dodano u signing wizard "documents" korak, sprema se u istoj
+`prisma.client.update` gdje se već ažurira `phone`. `returnLocation` i
+`odometerEnd` NEMAJU ulazni flow u ovoj sesiji - opisuju stanje NAKON
+najma (povrat vozila), a v1 nema "povrat vozila" značajku uopće (owner
+danas nema nikakav ekran za "vozilo je vraćeno"). Polja su dodana u shemu
+(nullable) da PDF format već postoji kad ta značajka jednom dođe - prijedlog
+za buduću sesiju: prirodno bi pripadala u Tier 3 backlog stavku "Status
+vozila: pod ugovorom / slobodno / na servisu" (vidi sekciju 7), gdje bi
+"vrati vozilo" akcija postavila i status i ova dva polja odjednom.
+
+**Company info u PDF-u je non-throwing (prazno umjesto pada signing flowa)
+- za razliku od `OWNER_EMAIL` koji baca ako nedostaje.** Namjerno
+asimetrično: `OWNER_EMAIL` je oduvijek bio required (bez njega se ne zna
+kome poslati kopiju ugovora - kritično za postojeći, već produkcijski
+flow). Novi `COMPANY_*` env varijable (`COMPANY_NAME/ADDRESS/OIB/PHONE/
+EMAIL`) su dodane naknadno - da njihov izostanak sruši CIJELI signing flow
+(koji je već produkcijski, ima stvarne korisnike) zbog praznog zaglavlja
+PDF-a bilo bi nerazmjerno. `getCompanyInfo()` u `documents.ts` vraća prazan
+string po polju umjesto bacanja; PDF prikazuje "—" gdje nedostaje.
+**Korisnikova preostala akcija:** popuniti stvarne vrijednosti
+(`COMPANY_ADDRESS`, `COMPANY_OIB`, `COMPANY_PHONE`) u `.env` i Vercel
+env varijablama prije idućeg produkcijskog potpisa - trenutno će PDF
+zaglavlje imati prazna polja za sve osim `COMPANY_NAME` (postavljen na
+"NAVALIS-CISSA" u `.env.example` kao primjer/default, ali stvarni `.env`
+treba provjeriti/postaviti ručno).
+
+**`Contract.number` kao odvojeno autoincrement Int polje, ne zamjena za
+cuid `id`.** Korisnik je tražio čitljiv sekvencijalni broj ugovora (za
+"Ugovori" karticu na vozilu i za PDF), a predložio je točno ovaj pristup
+("autoincrement integer polje na Contract modelu"). `id` ostaje cuid
+(primary key, koristi se u URL-ovima, storage putanjama
+`contracts/${id}/documents`, JWT signing tokenu `subjectId`, itd. - mijenjati
+ga bi bio puno veći zahvat za nula stvarne koristi). `number Int @unique
+@default(autoincrement())` je zaseban stupac s vlastitom Postgres
+sekvencom, prikazan owneru/klijentu kao "broj ugovora" umjesto sirovog
+cuid-a na PDF-u i u UI popisima. **Migracija je zahtijevala retroaktivno
+popunjavanje** (izravno pitanje iz korisnikovog zahtjeva) - obična Prisma
+`@default(autoincrement())` migracija bi Postgresu prepustila redoslijed
+popunjavanja pri `ALTER TABLE` (obično fizički redoslijed redaka, ne
+nužno isti kao `createdAt` redoslijed), pa je migracija ručno napisana
+(isti obrazac kao bug #16 - `prisma migrate dev` ionako ne radi
+neinteraktivno za ovakve promjene) s eksplicitnim `ROW_NUMBER() OVER
+(ORDER BY "createdAt" ASC)` backfillom prije nego je kolona postala
+`NOT NULL`+`UNIQUE`. Potvrđeno upitom nakon primjene: svih 16 postojećih
+ugovora dobilo je brojeve 1-16 u točnom kronološkom redoslijedu.
+
 ---
 
 ## 4. Poznata ograničenja / svjesni kompromisi
 
-1. **Slovo "đ" u dinamičkom PDF tekstu** (imena klijenata, opisi oštećenja
-   koje unosi klijent) može nedostajati u renderiranom PDF-u — popravljeno
-   je samo u statičkom tekstu template-a. Pravi fix bi trebao embedded
-   Unicode font (`Font.register`) — nije rađeno jer nosi rizik (vanjska
-   ovisnost o fontu ili bundling komplikacije) nesrazmjeran trenutnoj
-   vrijednosti. Č, ć, š, ž rade ispravno.
+1. ✅ **RIJEŠENO (vidi bug #34).** Slovo "đ" (i, ispostavilo se, i č/ć - ranija
+   tvrdnja "Č, ć, š, ž rade ispravno" bila je netočna) u PDF tekstu je
+   popravljeno embeddanim PT Sans fontom (`packages/api/src/pdf/fonts.ts`),
+   primijenjeno globalno kroz `styles.ts` - pokriva i statički i dinamički
+   tekst (imena, opisi oštećenja), za sva tri PDF template-a.
 
 2. **Potpis u PDF-u nije auto-cropan** (`getCanvas()` umjesto
    `getTrimmedCanvas()`) — uključuje prazan prostor oko same crte potpisa.
    Kozmetičko, ne funkcionalno.
 
-3. **Nema price/cijena polja na Contractu.** Originalni CLAUDE.md data model
-   nikad nije uključivao cijenu najma, pa je ni PDF ugovori ni baza ne
-   prikazuju. Ako stvarni ugovor treba navesti cijenu, treba dodati polje +
-   ažurirati `ContractPdf.tsx`.
+3. ✅ **RIJEŠENO.** `Contract.pricePerDay` dodan, unosi se u `/contracts/new`
+   (web i mobile) i sad je **obavezno, pozitivan broj** na kreiranju
+   ugovora (`contractCreateSchema`, `packages/api/src/schemas/contract.ts`)
+   - ranija verzija ove bilješke tvrdila je "opcionalno", ali polje na
+   mobileu uopće nije postojalo kao input dok se to nije provjerilo i
+   dodalo (web input je postojao, ali bez `required`). `ContractPdf.tsx`
+   prikazuje cijenu/dan, ukupno, PDV i osnovicu (računato).
+10. **Placeholder tekst uvjeta najma u signing wizardu** (`TERMS_TEXT` u
+    `sign/[token]/page.tsx`) - generički, nije pravni tekst. Kad stigne
+    pravi tekst, MORA se promijeniti i `TERMS_VERSION` (npr. "v2") - to je
+    vrijednost koja se sprema uz svaki potpisan ugovor, ključna za znati
+    koju je verziju konkretni klijent stvarno vidio.
+11. **`Contract.returnLocation`/`odometerEnd` nemaju ulazni flow.** Polja
+    postoje u shemi (nullable), ContractPdf prikazuje "—", ali nema ekrana
+    gdje bi se unijeli - v1 nema "povrat vozila" značajku. Vidi arhitektonsku
+    odluku "Gdje se unose novi Contract PDF podaci" za prijedlog (Tier 3
+    backlog).
 
 4. **Nema automatiziranih testova.** Sva verifikacija je bila
    typecheck + build + ručno/live testiranje kroz browser. Nema Jest/Playwright
@@ -975,12 +1491,14 @@ ruta = jedna briga" kao ostatak projekta.
    ne bug — ako postane repetitivno, razmisliti o trajnom (ali gitignored)
    `packages/api/.env` umjesto copy/delete ciklusa.
 
-8. **`apps/mobile` ima auth + navigacijski skeleton (modul 7, faza 1), ali
-   još nema feature ekrane.** Login/magic-link/role-routing/logout rade
-   (kodno, čeka live test na uređaju — vidi sekciju 5). Owner ima samo
-   placeholder home s brojem vozila, client ima placeholder home bez
-   podataka. Nema popisa vozila/ugovora, kreiranja ugovora, photo requesta,
-   ni ijednog client-facing podatka na mobileu još.
+8. **`apps/mobile` owner strana ima auth + sve core feature ekrane (modul 7,
+   faze 1+2), client strana i dalje samo placeholder home bez podataka.**
+   Owner: login/OTP kod/role-routing/logout (faza 1) + popis/detalj vozila
+   s uploadima, popis/dodavanje klijenata, popis ugovora + kreiranje +
+   photo request trigger (faza 2) — sve kodno gotovo, faza 2 još čeka live
+   test na uređaju (vidi sekciju 5). Client-mobile feature ekrani su
+   svjesno odgođeni (vidi arhitektonsku odluku niže) — nema pregleda
+   ugovora/dokumenata/potpisa/produženja na mobileu za klijenta.
 
 9. **Vlasnik (Owner) i test klijent dijele isti mail** (`b.malenica34@gmail.com`)
    jer je korisnik tražio test s vlastitim emailom. Zato callback nakon
@@ -988,6 +1506,25 @@ ruta = jedna briga" kao ostatak projekta.
    redirect logici), čak i kad je login iniciran s `/portal/login` — treba
    ručno otići na `/portal` da se vidi client view. Ovo je očekivano
    ponašanje za taj specifični test account, ne bug.
+
+   **Dodatak 2026-08-20 - dijagnoza prijavljenog "ugovor se ne šalje
+   mailom".** Korisnik je prijavio da se ugovor "ne može otvoriti jer se ne
+   uspijeva ni poslati mailom" i eksplicitno tražio uzrok prije bilo kakve
+   promjene koda. Upit nad produkcijskom bazom (najnoviji ugovor,
+   kreiran 2026-08-20T06:49:50Z) pokazao je `status: "sent"` i valjan,
+   neistekao, još nepotpisan `signingToken` - mail flow je stvarno prošao
+   do kraja (`createContractAndSendSigningEmail` ostavlja ugovor u
+   `draft`-u BEZ tokena ako `sendContractSigningEmail` baci grešku prije
+   završnog `prisma.contract.update` poziva; nula ugovora u bazi ima status
+   `draft`, što isključuje neuhvaćenu grešku pri slanju kao uzrok). Klijent
+   na tom ugovoru je `b.malenica34@gmail.com` - identičan `OWNER_EMAIL`.
+   Zaključak: nema dokaza stvarnog sloma u slanju; simptom je dosljedan s
+   ovim već poznatim ograničenjem (isti inbox, teško razlikovati/pronaći
+   client-facing mail među ownerovom poštom). Fix nije primijenjen jer
+   nema što popravljati na backend strani - preporuka korisniku: ponoviti
+   test sa stvarno različitim client emailom da se potvrdi radi li flow
+   uistinu, ili provjeriti spam/drugi tab istog inboxa za ovaj konkretan
+   mail.
 
 ---
 
@@ -1004,13 +1541,20 @@ je OTP kod (ne magic-link deep link — vidi bug #28 zašto). Preostaje:
    (identična prioritet-logika kao web callback, vidi ograničenje #9 dolje).
    Nije testirano ovom sesijom.
 
-**Sljedeće faze modula 7** (nisu još planirane u detalje):
-- Owner-mobile feature ekrani: popis/detalj vozila, kreiranje ugovora,
-  photo request trigger.
-- Client-mobile feature ekrani: pregled ugovora, dokumenti, potpis, zahtjev
-  za produženje — ovo će trebati i nove backend komade (`requireClientSession`
-  helper + client-facing JSON API rute ne postoje još ni za web, portal je
-  danas server-rendered HTML).
+**Modul 7, Faza 2 (owner-mobile feature ekrani) je kodno gotova** — popis/
+detalj vozila (uređivanje + upload prometne/police/slika), popis/dodavanje
+klijenata, popis ugovora + kreiranje + "zatraži slike" trigger. `tsc
+--noEmit` i `expo export` čisti. **Sljedeći korak: live test na uređaju**
+(`pnpm --filter mobile start`, Expo Go) — navigacija kroz sve nove ekrane,
+stvarni upload s telefonske kamere/galerije (permission dijalozi nisu
+testirani izvan simulacije), kreiranje ugovora i provjera da signing mail
+stigne identično kao s weba.
+
+**Preostaje nakon toga u modulu 7** (nije još planirano u detalje):
+- Client-mobile feature ekrani — svjesno odgođeno, vidi arhitektonsku
+  odluku. Ako se ikad zatraži: treba i nove backend komade
+  (`requireClientSession` helper + client-facing JSON API rute, portal je
+  danas server-rendered HTML, ne API).
 - Push notifikacije (CLAUDE.md ih spominje, nerazrađeno i za web — sve je
   trenutno email-only preko Resenda).
 
@@ -1063,3 +1607,52 @@ umjesto kroz UI — owner API rute su sad auth-zaštićene pa UI put zahtijeva
 pravu ulogiranu sesiju koju alat-browser ne može lako dobiti (PKCE
 ograničenje — magic link mora biti kliknut u ISTOM browseru koji ga je
 zatražio, vidi bug #14).
+
+**Dopuna 2026-08-19:** čak i server-side resolve (admin `generateLink` +
+ručni `fetch` s `redirect: "manual"` da se izvuče `Location` header s
+`code` parametrom, pa navigacija Browser Pane-a IZRAVNO na taj
+`localhost:3000/api/auth/callback?code=...` URL - izbjegava vanjsku
+Supabase domenu koju Browser Pane blokira bez ručnog odobrenja) je moguć u
+principu, ali korisnik je eksplicitno zaustavio taj pokušaj usred sesije
+("previše vremena na to") i potvrdio da je za promjene ovog tipa (UI/forma
+izmjene bez novih API ruta) typecheck+build+bundle export dovoljna
+verifikacija. Ne pokušavati ponovno bez izričitog dogovora.
+
+---
+
+## 7. Backlog budućih razvojnih faza (po prioritetu)
+
+Cijeli popis dao korisnik 2026-08-19. Tier 1 gotov ovom sesijom (vidi modul
+2 sekciju za implementacijske detalje). Tier 2-5 NISU dirani - čist
+kontekst za buduće sesije, ne počinjati bez eksplicitnog dogovora.
+
+**Tier 1 — UX brzina unosa** ✅ gotovo (ova sesija)
+1. Padajući izbornici marka/model/godina na formi vozila
+2. Brzi odabir početka najma (Danas/Sutra/Custom)
+3. Trajanje najma kao broj dana → auto-izračun datuma povrata
+4. (dopuna) Svi prikazani datumi u `DD.MM.GGGG.` formatu, web i mobile
+
+**Tier 2 — Dokument-generacija i ekstrakcija** (nije dirano)
+- OCR ekstrakcija podataka s prometne i police osiguranja (marka, model,
+  VIN, registracija) - datum isteka registracije vaditi iz police (PDF,
+  tekst-parsing), NE s prometne (pečat prekriva datum na fizičkom
+  dokumentu - korisnikova eksplicitna napomena, važno za implementaciju)
+- Opcionalno: OCR ekstrakcija osobne/vozačke za prefil client podataka u
+  ugovoru
+- Generator punomoći za registraciju vozila (PDF, fiksni predložak: podaci
+  tvrtke + vozila + zaposlenika, print-ready) - vozila su vlasništvo
+  tvrtke, zaposlenici idu registrirati
+
+**Tier 3 — Status vozila i pregled flote** (nije dirano)
+- Status vozila: pod ugovorom / slobodno / na servisu
+- Povijest najma po vozilu, numeriranje ugovora
+
+**Tier 4 — Servis i statistika** (nije dirano)
+- Unos servisa po vozilu, povijest servisa, statistika vozila
+
+**Tier 5 — Financije** (nije dirano, korisnik eksplicitno tražio istraživanje
+zakonskih zahtjeva PRIJE koda)
+- Izdavanje R1 računa
+- Stripe plaćanje
+- Generiranje barkoda za plaćanje
+- R2 računi

@@ -150,7 +150,12 @@ export async function completeAnnexSigning(
 
     const annexPdfBuffer = await renderAnnexPdf({
       annex: { id: annex.id, newDateTo: input.newDateTo, signedAt: new Date() },
-      contract: { id: contract.id, dateFrom: contract.dateFrom, previousDateTo: contract.dateTo },
+      contract: {
+        id: contract.id,
+        number: contract.number,
+        dateFrom: contract.dateFrom,
+        previousDateTo: contract.dateTo,
+      },
       vehicle: {
         make: contract.vehicle.make,
         model: contract.vehicle.model,

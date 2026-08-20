@@ -12,6 +12,20 @@ function getOwnerEmail(): string {
   return email;
 }
 
+// Za zaglavlje Contract PDF-a. Za razliku od getOwnerEmail() namjerno NE
+// baca ako nedostaje - dodano naknadno (nije bio dio izvornog v1 scope-a),
+// pa ne smije srušiti postojeći signing flow ako owner još nije popunio
+// ove env varijable. PDF template prikazuje prazno/"—" za nepopunjena polja.
+function getCompanyInfo() {
+  return {
+    name: process.env.COMPANY_NAME ?? "",
+    address: process.env.COMPANY_ADDRESS ?? "",
+    oib: process.env.COMPANY_OIB ?? "",
+    phone: process.env.COMPANY_PHONE ?? "",
+    email: process.env.COMPANY_EMAIL ?? process.env.OWNER_EMAIL ?? "",
+  };
+}
+
 /**
  * Generira ugovor + primopredajni zapisnik kao PDF (sa svim slikama
  * primopredaje i opisima oštećenja), sprema ih na Hetzner, i mailom šalje
@@ -37,9 +51,11 @@ export async function finalizeContractDocuments(contractId: string): Promise<voi
     getPresignedDownloadUrl(contract.signatureKey, 3600),
     Promise.all(
       contract.handoverPhotos.map(async (photo: HandoverPhoto) => ({
+        id: photo.id,
         angle: photo.angle,
         url: await getPresignedDownloadUrl(photo.key, 3600),
         damageDescription: photo.damageDescription,
+        damagedPart: photo.damagedPart,
       }))
     ),
   ]);
@@ -48,9 +64,19 @@ export async function finalizeContractDocuments(contractId: string): Promise<voi
     renderContractPdf({
       contract: {
         id: contract.id,
+        number: contract.number,
         dateFrom: contract.dateFrom,
         dateTo: contract.dateTo,
         signedAt: contract.signedAt,
+        pickupLocation: contract.pickupLocation,
+        returnLocation: contract.returnLocation,
+        odometerStart: contract.odometerStart,
+        odometerEnd: contract.odometerEnd,
+        pricePerDay: contract.pricePerDay,
+        excessAmount: contract.excessAmount,
+        paymentMethod: contract.paymentMethod,
+        termsAcceptedAt: contract.termsAcceptedAt,
+        termsVersion: contract.termsVersion,
       },
       vehicle: {
         make: contract.vehicle.make,
@@ -65,11 +91,13 @@ export async function finalizeContractDocuments(contractId: string): Promise<voi
         oib: contract.client.oib,
         email: contract.client.email,
         phone: contract.client.phone,
+        address: contract.client.address,
       },
+      company: getCompanyInfo(),
       signatureUrl,
     }),
     renderProtocolPdf({
-      contract: { id: contract.id, dateFrom: contract.dateFrom, dateTo: contract.dateTo },
+      contract: { id: contract.id, number: contract.number, dateFrom: contract.dateFrom, dateTo: contract.dateTo },
       vehicle: {
         make: contract.vehicle.make,
         model: contract.vehicle.model,

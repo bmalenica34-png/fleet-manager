@@ -1,9 +1,6 @@
 import { createClient } from "@/lib/supabase/server";
 import { listContractsForClientUser } from "@rent-a-car/api/server";
-
-function formatDate(value: Date): string {
-  return new Date(value).toLocaleDateString("hr-HR");
-}
+import { formatDateHr as formatDate } from "@rent-a-car/api";
 
 export default async function PortalPage() {
   const supabase = createClient();

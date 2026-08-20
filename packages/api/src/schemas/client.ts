@@ -11,6 +11,7 @@ export const clientCreateSchema = z.object({
   // povezivanje s Supabase auth računom pri loginu (linkGuestClientsToUser).
   email: z.string().email().toLowerCase(),
   phone: z.string().min(1),
+  address: z.string().min(1).optional(),
   driverLicenseKey: z.string().min(1).optional(),
   idDocumentKey: z.string().min(1).optional(),
 });

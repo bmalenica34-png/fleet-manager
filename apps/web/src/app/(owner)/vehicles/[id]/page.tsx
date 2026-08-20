@@ -3,12 +3,37 @@
 import { useEffect, useRef, useState } from "react";
 import { useParams } from "next/navigation";
 import type { VehicleDTO } from "@rent-a-car/api/server";
+import { OTHER_VEHICLE_OPTION, VEHICLE_MAKES, VEHICLE_MODELS_BY_MAKE, formatDateHr } from "@rent-a-car/api";
+
+const CURRENT_YEAR = new Date().getFullYear();
+const YEAR_OPTIONS = Array.from({ length: CURRENT_YEAR + 1 - 1980 + 1 }, (_, i) => CURRENT_YEAR + 1 - i);
 
 interface StagedImage {
   id: string;
   file: File;
   previewUrl: string;
 }
+
+interface VehicleContractItem {
+  id: string;
+  number: number;
+  vehicleId: string;
+  status: string;
+  dateFrom: string;
+  dateTo: string;
+  client: { firstName: string; lastName: string };
+  contractPdfUrl: string | null;
+}
+
+type VehicleTab = "info" | "documents" | "images" | "service" | "contracts";
+
+const TABS: { id: VehicleTab; label: string }[] = [
+  { id: "info", label: "Podaci o vozilu" },
+  { id: "documents", label: "Dokumenti" },
+  { id: "images", label: "Slike vozila" },
+  { id: "service", label: "Servisna knjižica" },
+  { id: "contracts", label: "Ugovori" },
+];
 
 export default function VehicleDetailPage() {
   const params = useParams<{ id: string }>();
@@ -18,6 +43,16 @@ export default function VehicleDetailPage() {
   const [loading, setLoading] = useState(true);
   const [savingInfo, setSavingInfo] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const [activeTab, setActiveTab] = useState<VehicleTab>("info");
+  const [contracts, setContracts] = useState<VehicleContractItem[]>([]);
+  const [contractsLoading, setContractsLoading] = useState(true);
+
+  const [make, setMake] = useState("");
+  const [customMake, setCustomMake] = useState("");
+  const [model, setModel] = useState("");
+  const [customModel, setCustomModel] = useState("");
+  const [year, setYear] = useState("");
 
   // Prometna: file se drži u state-u i prikazuje kao preview dok korisnik
   // ne klikne "Spremi prometnu" - upload se ne šalje odmah na odabir.
@@ -51,6 +86,52 @@ export default function VehicleDetailPage() {
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [vehicleId]);
+
+  useEffect(() => {
+    fetch("/api/contracts")
+      .then((res) => res.json())
+      .then(setContracts)
+      .finally(() => setContractsLoading(false));
+  }, []);
+
+  const vehicleContracts = contracts.filter((c) => c.vehicleId === vehicleId);
+
+  // Marka/model/godina su controlled selecti (za cascading model-popis i
+  // "Ostalo" custom unos) - ostala polja i dalje idu kroz defaultValue +
+  // FormData na submit, nepromijenjeno. Ako spremljena marka/model nisu na
+  // statičkoj listi (stariji unos ili "Ostalo" iz prije), pada natrag na
+  // custom tekstualni način umjesto da tiho izgubi vrijednost.
+  useEffect(() => {
+    if (!vehicle) return;
+    if (VEHICLE_MAKES.includes(vehicle.make)) {
+      setMake(vehicle.make);
+      const models = VEHICLE_MODELS_BY_MAKE[vehicle.make] ?? [];
+      if (models.includes(vehicle.model)) {
+        setModel(vehicle.model);
+        setCustomModel("");
+      } else {
+        setModel(OTHER_VEHICLE_OPTION);
+        setCustomModel(vehicle.model);
+      }
+      setCustomMake("");
+    } else {
+      setMake(OTHER_VEHICLE_OPTION);
+      setCustomMake(vehicle.make);
+      setModel(OTHER_VEHICLE_OPTION);
+      setCustomModel(vehicle.model);
+    }
+    setYear(vehicle.year ? String(vehicle.year) : "");
+  }, [vehicle]);
+
+  const isCustomMake = make === OTHER_VEHICLE_OPTION;
+  const isCustomModel = isCustomMake || model === OTHER_VEHICLE_OPTION;
+  const modelOptions = isCustomMake ? [] : (VEHICLE_MODELS_BY_MAKE[make] ?? []);
+
+  function handleMakeChange(value: string) {
+    setMake(value);
+    setModel("");
+    setCustomModel("");
+  }
 
   // Preview za prometnu - generira se svaki put kad se docFile promijeni,
   // stari object URL se revoke-a da ne curi memorija.
@@ -89,14 +170,21 @@ export default function VehicleDetailPage() {
   async function handleInfoSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setError(null);
+
+    const resolvedMake = isCustomMake ? customMake.trim() : make;
+    const resolvedModel = isCustomModel ? customModel.trim() : model;
+    if (!resolvedMake || !resolvedModel) {
+      setError("Odaberi ili upiši marku i model.");
+      return;
+    }
+
     setSavingInfo(true);
 
     const formData = new FormData(event.currentTarget);
-    const year = formData.get("year");
     const registrationExpiresAt = formData.get("registrationExpiresAt");
     const payload = {
-      make: formData.get("make"),
-      model: formData.get("model"),
+      make: resolvedMake,
+      model: resolvedModel,
       year: year ? Number(year) : undefined,
       licensePlate: formData.get("licensePlate"),
       vin: formData.get("vin") || undefined,
@@ -238,18 +326,71 @@ export default function VehicleDetailPage() {
         {vehicle.make} {vehicle.model}
       </h1>
 
+      <div className="toolbar" style={{ justifyContent: "flex-start", gap: "0.5rem" }}>
+        {TABS.map((tab) => (
+          <button
+            key={tab.id}
+            type="button"
+            className={`btn${activeTab === tab.id ? " btn-primary" : ""}`}
+            onClick={() => setActiveTab(tab.id)}
+          >
+            {tab.label}
+          </button>
+        ))}
+      </div>
+
+      {activeTab === "info" && (
       <form onSubmit={handleInfoSubmit}>
         <label>
           Marka
-          <input name="make" defaultValue={vehicle.make} required />
+          <select value={make} onChange={(e) => handleMakeChange(e.target.value)} required>
+            <option value="" disabled>
+              Odaberi marku
+            </option>
+            {VEHICLE_MAKES.map((m) => (
+              <option key={m} value={m}>
+                {m}
+              </option>
+            ))}
+            <option value={OTHER_VEHICLE_OPTION}>{OTHER_VEHICLE_OPTION}</option>
+          </select>
         </label>
+        {isCustomMake && (
+          <label>
+            Upiši marku
+            <input value={customMake} onChange={(e) => setCustomMake(e.target.value)} required />
+          </label>
+        )}
+
         <label>
           Model
-          <input name="model" defaultValue={vehicle.model} required />
+          {isCustomModel ? (
+            <input value={customModel} onChange={(e) => setCustomModel(e.target.value)} required />
+          ) : (
+            <select value={model} onChange={(e) => setModel(e.target.value)} required disabled={!make}>
+              <option value="" disabled>
+                Odaberi model
+              </option>
+              {modelOptions.map((m) => (
+                <option key={m} value={m}>
+                  {m}
+                </option>
+              ))}
+              <option value={OTHER_VEHICLE_OPTION}>{OTHER_VEHICLE_OPTION}</option>
+            </select>
+          )}
         </label>
+
         <label>
           Godina
-          <input name="year" type="number" min={1950} defaultValue={vehicle.year ?? ""} />
+          <select value={year} onChange={(e) => setYear(e.target.value)}>
+            <option value="">Nepoznato</option>
+            {YEAR_OPTIONS.map((y) => (
+              <option key={y} value={y}>
+                {y}
+              </option>
+            ))}
+          </select>
         </label>
         <label>
           Registarske tablice
@@ -278,7 +419,10 @@ export default function VehicleDetailPage() {
           {savingInfo ? "Spremanje..." : "Spremi promjene"}
         </button>
       </form>
+      )}
 
+      {activeTab === "documents" && (
+      <>
       <h2 style={{ marginTop: "2rem" }}>Prometna</h2>
       {vehicle.registrationDocUrl && !docPreviewUrl && (
         <p>
@@ -346,7 +490,11 @@ export default function VehicleDetailPage() {
         </button>
       )}
       {insuranceError && <p className="error">{insuranceError}</p>}
+      </>
+      )}
 
+      {activeTab === "images" && (
+      <>
       <h2 style={{ marginTop: "2rem" }}>Slike vozila</h2>
       <div className="image-grid">
         {vehicle.images.map((image) => (
@@ -382,6 +530,60 @@ export default function VehicleDetailPage() {
         </button>
       )}
       {imagesError && <p className="error">{imagesError}</p>}
+      </>
+      )}
+
+      {activeTab === "service" && (
+        <p className="muted" style={{ marginTop: "2rem" }}>
+          Servisna knjižica - uskoro. Puna funkcionalnost servisne povijesti (unos servisa, datumi,
+          troškovi) dolazi u budućoj nadogradnji.
+        </p>
+      )}
+
+      {activeTab === "contracts" && (
+        <div style={{ marginTop: "2rem" }}>
+          {contractsLoading ? (
+            <p className="muted">Učitavanje...</p>
+          ) : vehicleContracts.length === 0 ? (
+            <p className="muted">Nema ugovora za ovo vozilo.</p>
+          ) : (
+            <table>
+              <thead>
+                <tr>
+                  <th>Broj</th>
+                  <th>Od</th>
+                  <th>Do</th>
+                  <th>Status</th>
+                  <th>Klijent</th>
+                  <th>Dokument</th>
+                </tr>
+              </thead>
+              <tbody>
+                {vehicleContracts.map((c) => (
+                  <tr key={c.id}>
+                    <td>{c.number}</td>
+                    <td>{formatDateHr(c.dateFrom)}</td>
+                    <td>{formatDateHr(c.dateTo)}</td>
+                    <td>{c.status}</td>
+                    <td>
+                      {c.client.firstName} {c.client.lastName}
+                    </td>
+                    <td>
+                      {c.contractPdfUrl ? (
+                        <a href={c.contractPdfUrl} target="_blank" rel="noreferrer">
+                          Preuzmi PDF
+                        </a>
+                      ) : (
+                        <span className="muted">—</span>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+      )}
     </div>
   );
 }

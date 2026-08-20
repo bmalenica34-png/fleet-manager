@@ -1,5 +1,5 @@
 import type { Client, Contract, Vehicle } from "@prisma/client";
-import { requiredHandoverAngles, type PhotoAngle } from "../schemas/handoverPhoto";
+import { requiredHandoverAngles, type PhotoAngle, type VehiclePart } from "../schemas/handoverPhoto";
 import { prisma } from "../db/client";
 import { verifySigningToken } from "../lib/signing-token";
 import { buildObjectKey, uploadObject } from "../storage/hetzner";
@@ -45,10 +45,17 @@ interface UploadedFile {
 
 export interface CompleteSigningInput {
   phone: string;
+  address?: string;
   driverLicense: UploadedFile;
   idDocument: UploadedFile;
-  photos: { angle: PhotoAngle; file: UploadedFile; damageDescription?: string }[];
+  photos: {
+    angle: PhotoAngle;
+    file: UploadedFile;
+    damageDescription?: string;
+    damagedPart?: VehiclePart;
+  }[];
   signaturePngBuffer: Buffer;
+  termsVersion: string;
 }
 
 export type CompleteSigningResult =
@@ -111,14 +118,19 @@ export async function completeSigning(
         photo.file.filename
       );
       await uploadObject({ key, body: photo.file.buffer, contentType: photo.file.contentType });
-      return { angle: photo.angle, key, damageDescription: photo.damageDescription };
+      return {
+        angle: photo.angle,
+        key,
+        damageDescription: photo.damageDescription,
+        damagedPart: photo.damagedPart,
+      };
     })
   );
 
   await prisma.$transaction([
     prisma.client.update({
       where: { id: contract.clientId },
-      data: { phone: input.phone, driverLicenseKey, idDocumentKey },
+      data: { phone: input.phone, address: input.address, driverLicenseKey, idDocumentKey },
     }),
     prisma.handoverPhoto.createMany({
       data: photoUploads.map((p) => ({
@@ -126,6 +138,7 @@ export async function completeSigning(
         angle: p.angle,
         key: p.key,
         damageDescription: p.damageDescription,
+        damagedPart: p.damagedPart,
       })),
     }),
     prisma.contract.update({
@@ -136,6 +149,10 @@ export async function completeSigning(
         status: "signed",
         signingToken: null,
         signingTokenExpiresAt: null,
+        // Server-side timestamp (ne klijentski) - pouzdaniji zapis "kad je
+        // stvarno primljeno" nego trenutak koji bi klijent mogao poslati.
+        termsAcceptedAt: new Date(),
+        termsVersion: input.termsVersion,
       },
     }),
   ]);

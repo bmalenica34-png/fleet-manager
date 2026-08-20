@@ -2,30 +2,32 @@ import { StyleSheet } from "@react-pdf/renderer";
 
 export const styles = StyleSheet.create({
   page: {
-    padding: 40,
+    padding: 32,
     fontSize: 10,
-    fontFamily: "Helvetica",
+    fontFamily: "PTSans",
     color: "#1a1a1a",
   },
   title: {
-    fontSize: 16,
-    fontFamily: "Helvetica-Bold",
-    marginBottom: 4,
+    fontSize: 15,
+    fontFamily: "PTSans",
+    fontWeight: "bold",
+    marginBottom: 3,
   },
   subtitle: {
     fontSize: 9,
     color: "#555555",
-    marginBottom: 16,
+    marginBottom: 12,
   },
   section: {
-    marginBottom: 14,
+    marginBottom: 9,
   },
   sectionTitle: {
     fontSize: 11,
-    fontFamily: "Helvetica-Bold",
-    marginBottom: 6,
+    fontFamily: "PTSans",
+    fontWeight: "bold",
+    marginBottom: 4,
     borderBottom: "1px solid #cccccc",
-    paddingBottom: 3,
+    paddingBottom: 2,
   },
   row: {
     flexDirection: "row",
@@ -55,7 +57,8 @@ export const styles = StyleSheet.create({
     marginBottom: 4,
   },
   photoLabel: {
-    fontFamily: "Helvetica-Bold",
+    fontFamily: "PTSans",
+    fontWeight: "bold",
     fontSize: 9,
     marginBottom: 2,
   },
@@ -70,6 +73,79 @@ export const styles = StyleSheet.create({
     width: 200,
     height: 80,
     marginTop: 6,
+  },
+  headerRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "flex-start",
+    borderBottom: "1px solid #cccccc",
+    paddingBottom: 8,
+    marginBottom: 8,
+  },
+  companyBlock: {
+    maxWidth: 320,
+  },
+  companyName: {
+    fontSize: 13,
+    fontFamily: "PTSans",
+    fontWeight: "bold",
+    marginBottom: 2,
+  },
+  companyLine: {
+    fontSize: 8,
+    color: "#444444",
+  },
+  contractNumberBox: {
+    border: "1px solid #1a1a1a",
+    borderRadius: 4,
+    padding: 8,
+    minWidth: 160,
+    alignItems: "center",
+  },
+  contractNumberLabel: {
+    fontSize: 8,
+    color: "#555555",
+    marginBottom: 3,
+  },
+  contractNumberValue: {
+    fontSize: 11,
+    fontFamily: "PTSans",
+    fontWeight: "bold",
+  },
+  warningBlock: {
+    border: "1px solid #cccccc",
+    borderRadius: 4,
+    padding: 6,
+    marginBottom: 6,
+    gap: 2,
+  },
+  warningTitle: {
+    fontSize: 9,
+    fontFamily: "PTSans",
+    fontWeight: "bold",
+    marginBottom: 2,
+  },
+  warningText: {
+    fontSize: 8,
+    color: "#333333",
+  },
+  warningTextBold: {
+    fontSize: 8,
+    fontFamily: "PTSans",
+    fontWeight: "bold",
+  },
+  termsLine: {
+    fontSize: 8,
+    color: "#444444",
+    marginBottom: 6,
+  },
+  signatureRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    marginTop: 6,
+  },
+  signatureCol: {
+    width: "48%",
   },
   footer: {
     position: "absolute",

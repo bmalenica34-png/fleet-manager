@@ -1,9 +1,12 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { formatDateHr } from "@rent-a-car/api";
 
 interface ContractListItem {
   id: string;
+  number: number;
+  vehicleId: string;
   status: string;
   dateFrom: string;
   dateTo: string;
@@ -13,10 +16,6 @@ interface ContractListItem {
   protocolPdfUrl: string | null;
   latestAnnex: { status: string; newDateTo: string } | null;
   latestPhotoRequest: { requestedAt: string; fulfilledAt: string | null } | null;
-}
-
-function formatDate(value: string): string {
-  return new Date(value).toLocaleDateString("hr-HR");
 }
 
 function isActive(c: ContractListItem): boolean {
@@ -67,6 +66,7 @@ export default function ContractsPage() {
         <table>
           <thead>
             <tr>
+              <th>Broj</th>
               <th>Vozilo</th>
               <th>Klijent</th>
               <th>Od</th>
@@ -82,21 +82,22 @@ export default function ContractsPage() {
               const hasPendingPhotoRequest = c.latestPhotoRequest && !c.latestPhotoRequest.fulfilledAt;
               return (
                 <tr key={c.id}>
+                  <td>{c.number}</td>
                   <td>
                     {c.vehicle.make} {c.vehicle.model} ({c.vehicle.licensePlate})
                   </td>
                   <td>
                     {c.client.firstName} {c.client.lastName}
                   </td>
-                  <td>{formatDate(c.dateFrom)}</td>
-                  <td>{formatDate(c.dateTo)}</td>
+                  <td>{formatDateHr(c.dateFrom)}</td>
+                  <td>{formatDateHr(c.dateTo)}</td>
                   <td>{c.status}</td>
                   <td>
                     {c.latestAnnex ? (
                       c.latestAnnex.status === "signed" ? (
-                        `Produženo do ${formatDate(c.latestAnnex.newDateTo)}`
+                        `Produženo do ${formatDateHr(c.latestAnnex.newDateTo)}`
                       ) : c.latestAnnex.status === "sent" ? (
-                        `Zahtjev poslan (do ${formatDate(c.latestAnnex.newDateTo)})`
+                        `Zahtjev poslan (do ${formatDateHr(c.latestAnnex.newDateTo)})`
                       ) : (
                         c.latestAnnex.status
                       )
@@ -122,7 +123,7 @@ export default function ContractsPage() {
                   <td>
                     {hasPendingPhotoRequest ? (
                       <span className="muted">
-                        Zahtjev poslan {formatDate(c.latestPhotoRequest!.requestedAt)}
+                        Zahtjev poslan {formatDateHr(c.latestPhotoRequest!.requestedAt)}
                       </span>
                     ) : isActive(c) ? (
                       <button
@@ -134,7 +135,7 @@ export default function ContractsPage() {
                       </button>
                     ) : c.latestPhotoRequest?.fulfilledAt ? (
                       <span className="muted">
-                        Primljeno {formatDate(c.latestPhotoRequest.fulfilledAt)}
+                        Primljeno {formatDateHr(c.latestPhotoRequest.fulfilledAt)}
                       </span>
                     ) : (
                       <span className="muted">—</span>

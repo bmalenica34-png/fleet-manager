@@ -208,6 +208,15 @@ textarea {
   margin: 1rem 0;
 }
 
+/* Signing/photo-request wizardi se najčešće otvaraju na telefonu (klijent
+   klika mail link) - 2x2 grid je pretijesan za slike na uskim širinama,
+   pa ispod 640px prelazi na jednu kolonu (jedna slika ispod druge). */
+@media (max-width: 640px) {
+  .angle-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
 .angle-slot {
   border: 1px dashed rgba(128, 128, 128, 0.4);
   border-radius: 8px;
@@ -246,4 +255,43 @@ textarea {
   justify-content: space-between;
   margin-top: 1.25rem;
   gap: 0.75rem;
+}
+
+.damage-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  margin: 1rem 0;
+}
+
+.damage-row {
+  border: 1px dashed rgba(128, 128, 128, 0.4);
+  border-radius: 8px;
+  padding: 0.6rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.damage-row img {
+  width: 100%;
+  height: 120px;
+  object-fit: cover;
+  border-radius: 6px;
+}
+
+.damage-row textarea {
+  min-height: 50px;
+  font-size: 0.8rem;
+}
+
+.terms-box {
+  height: 260px;
+  overflow-y: auto;
+  border: 1px solid rgba(128, 128, 128, 0.4);
+  border-radius: 8px;
+  padding: 0.9rem;
+  margin-top: 0.75rem;
+  font-size: 0.85rem;
+  line-height: 1.5;
 }

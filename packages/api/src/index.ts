@@ -4,6 +4,8 @@ export * from "./schemas/contract";
 export * from "./schemas/handoverPhoto";
 export * from "./schemas/annex";
 export * from "./schemas/photoRequest";
+export * from "./lib/dateFormat";
+export * from "./data/vehicleCatalog";
 
 export type {
   Vehicle,
@@ -14,6 +16,7 @@ export type {
   ContractStatus,
   HandoverPhoto,
   PhotoAngle,
+  VehiclePart,
   Annex,
   AnnexStatus,
   PhotoRequest,

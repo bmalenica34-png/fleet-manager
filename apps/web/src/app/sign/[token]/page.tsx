@@ -3,7 +3,9 @@
 import { useEffect, useRef, useState } from "react";
 import { useParams } from "next/navigation";
 import SignatureCanvas from "react-signature-canvas";
-import type { PhotoAngle } from "@rent-a-car/api";
+import type { PhotoAngle, VehiclePart } from "@rent-a-car/api";
+import { compressImageFile } from "@/lib/compressImage";
+import { formatDateHr as formatDate } from "@rent-a-car/api";
 
 const REQUIRED_ANGLES: PhotoAngle[] = ["front", "back", "left", "right"];
 const ANGLE_LABELS: Record<PhotoAngle, string> = {
@@ -17,8 +19,68 @@ const ANGLE_LABELS: Record<PhotoAngle, string> = {
   other: "Ostalo",
 };
 
-type Step = "documents" | "photos" | "signature" | "review";
-const STEPS: Step[] = ["documents", "photos", "signature", "review"];
+const VEHICLE_PART_LABELS: Record<VehiclePart, string> = {
+  front_bumper: "Prednji branik",
+  rear_bumper: "Stražnji branik",
+  hood: "Haube",
+  trunk: "Prtljažnik",
+  roof: "Krov",
+  windshield: "Vjetrobransko staklo",
+  rear_window: "Stražnje staklo",
+  left_front_door: "Lijeva prednja vrata",
+  left_rear_door: "Lijeva stražnja vrata",
+  right_front_door: "Desna prednja vrata",
+  right_rear_door: "Desna stražnja vrata",
+  left_front_fender: "Lijevo prednje blatobran",
+  right_front_fender: "Desno prednje blatobran",
+  left_rear_fender: "Lijevo stražnje blatobran",
+  right_rear_fender: "Desno stražnje blatobran",
+  left_mirror: "Lijevo bočno ogledalo",
+  right_mirror: "Desno bočno ogledalo",
+  left_front_wheel: "Lijeva prednja guma/naplatak",
+  right_front_wheel: "Desna prednja guma/naplatak",
+  left_rear_wheel: "Lijeva stražnja guma/naplatak",
+  right_rear_wheel: "Desna stražnja guma/naplatak",
+  headlight_left: "Lijevo prednje svjetlo",
+  headlight_right: "Desno prednje svjetlo",
+  taillight_left: "Lijevo stražnje svjetlo",
+  taillight_right: "Desno stražnje svjetlo",
+  interior: "Unutrašnjost",
+  other: "Ostalo",
+};
+const VEHICLE_PART_OPTIONS = Object.keys(VEHICLE_PART_LABELS) as VehiclePart[];
+
+// Placeholder tekst - zamijeniti pravim pravnim tekstom kad stigne. Kad se
+// zamijeni, TERMS_VERSION MORA se promijeniti (npr. "v2") - to je vrijednost
+// koja se sprema uz svaki potpisan ugovor (Contract.termsVersion), da se
+// zna točno koju verziju je konkretni klijent vidio i prihvatio.
+const TERMS_VERSION = "placeholder-v1";
+const TERMS_TEXT = `1. Predmet ugovora
+Ovim Uvjetima najma uređuju se prava i obveze najmodavca i najmoprimca u vezi s najmom vozila opisanog u ugovoru. Potpisom ugovora najmoprimac potvrđuje da je pročitao, razumio i prihvatio ove uvjete u cijelosti.
+
+2. Korištenje vozila
+Vozilo smije upravljati isključivo osoba navedena kao najmoprimac (ili dodatni vozač naveden u ugovoru), koja posjeduje važeću vozačku dozvolu odgovarajuće kategorije. Vozilo se ne smije koristiti za prijevoz osoba ili stvari uz naknadu, sudjelovanje u utrkama ili testiranjima, vuču drugih vozila, ili bilo koju drugu svrhu suprotnu njegovoj namjeni.
+
+3. Stanje vozila i primopredaja
+Najmoprimac potvrđuje da je vozilo preuzeo u ispravnom stanju, bez vidljivih oštećenja osim onih izričito navedenih u primopredajnom zapisniku i pripadajućim fotografijama. Najmoprimac je dužan vratiti vozilo u istom stanju, uz uobičajeno trošenje, na dogovorenom mjestu i u dogovoreno vrijeme.
+
+4. Gorivo
+Vozilo se predaje s određenom količinom goriva i mora se vratiti s istom količinom, osim ako je drugačije dogovoreno. U protivnom, najmodavac zadržava pravo naplate razlike goriva uvećane za trošak usluge točenja.
+
+5. Odgovornost za štetu
+Najmoprimac odgovara za svu štetu nastalu na vozilu tijekom trajanja najma, do iznosa učešća u šteti navedenog u ugovoru, osim ako je šteta nastala krivnjom treće strane uz uredno prijavljen policijski zapisnik. U slučaju prometne nezgode, najmoprimac je obavezan odmah obavijestiti policiju i najmodavca.
+
+6. Produženje najma
+Svako produženje razdoblja najma mora biti unaprijed dogovoreno s najmodavcem i potvrđeno pisanim putem (aneksom ugovora). Neovlašteno zadržavanje vozila nakon isteka ugovorenog razdoblja smatra se kršenjem ugovora.
+
+7. Obrada osobnih podataka
+Najmodavac obrađuje osobne podatke najmoprimca isključivo u svrhu izvršenja ovog ugovora, sukladno važećim propisima o zaštiti osobnih podataka, te ih ne ustupa trećim stranama osim kada je to zakonski obvezno.
+
+8. Završne odredbe
+Za sve što nije uređeno ovim uvjetima primjenjuju se odredbe Zakona o obveznim odnosima i drugih važećih propisa Republike Hrvatske. Eventualni sporovi rješavaju se sporazumno, a u slučaju spora nadležan je sud prema sjedištu najmodavca.`;
+
+type Step = "documents" | "photos" | "terms" | "signature" | "review";
+const STEPS: Step[] = ["documents", "photos", "terms", "signature", "review"];
 
 interface ContractSummary {
   id: string;
@@ -37,8 +99,10 @@ interface AngleSlot extends FilePreview {
   damageDescription: string;
 }
 
-function formatDate(value: string): string {
-  return new Date(value).toLocaleDateString("hr-HR");
+interface DamageEntry extends FilePreview {
+  id: string;
+  part: VehiclePart | "";
+  description: string;
 }
 
 export default function SigningWizardPage() {
@@ -52,6 +116,7 @@ export default function SigningWizardPage() {
   const [step, setStep] = useState<Step>("documents");
 
   const [phone, setPhone] = useState("");
+  const [address, setAddress] = useState("");
   const [driverLicense, setDriverLicense] = useState<FilePreview>({ file: null, previewUrl: null });
   const [idDocument, setIdDocument] = useState<FilePreview>({ file: null, previewUrl: null });
 
@@ -65,6 +130,11 @@ export default function SigningWizardPage() {
     odometer: { file: null, previewUrl: null, damageDescription: "" },
     other: { file: null, previewUrl: null, damageDescription: "" },
   });
+
+  const [damages, setDamages] = useState<DamageEntry[]>([]);
+
+  const [termsScrolledToBottom, setTermsScrolledToBottom] = useState(false);
+  const [termsAccepted, setTermsAccepted] = useState(false);
 
   const [signatureEmpty, setSignatureEmpty] = useState(true);
   const [signatureDataUrl, setSignatureDataUrl] = useState<string | null>(null);
@@ -115,7 +185,8 @@ export default function SigningWizardPage() {
     return { file, previewUrl: url };
   }
 
-  function handleAngleFileChange(angle: PhotoAngle, file: File | null) {
+  async function handleAngleFileChange(angle: PhotoAngle, rawFile: File | null) {
+    const file = rawFile ? await compressImageFile(rawFile) : null;
     setAngles((prev) => ({
       ...prev,
       [angle]: { ...replaceFilePreview(prev[angle], file), damageDescription: prev[angle].damageDescription },
@@ -126,8 +197,51 @@ export default function SigningWizardPage() {
     setAngles((prev) => ({ ...prev, [angle]: { ...prev[angle], damageDescription: value } }));
   }
 
+  function addDamageEntry() {
+    setDamages((prev) => [
+      ...prev,
+      { id: crypto.randomUUID(), part: "", file: null, previewUrl: null, description: "" },
+    ]);
+  }
+
+  function removeDamageEntry(id: string) {
+    setDamages((prev) => {
+      const target = prev.find((d) => d.id === id);
+      if (target?.previewUrl) {
+        URL.revokeObjectURL(target.previewUrl);
+        createdUrlsRef.current.delete(target.previewUrl);
+      }
+      return prev.filter((d) => d.id !== id);
+    });
+  }
+
+  function updateDamagePart(id: string, part: VehiclePart) {
+    setDamages((prev) => prev.map((d) => (d.id === id ? { ...d, part } : d)));
+  }
+
+  async function handleDamageFileChange(id: string, rawFile: File | null) {
+    const file = rawFile ? await compressImageFile(rawFile) : null;
+    setDamages((prev) =>
+      prev.map((d) => (d.id === id ? { ...d, ...replaceFilePreview(d, file) } : d))
+    );
+  }
+
+  function updateDamageDescription(id: string, value: string) {
+    setDamages((prev) => prev.map((d) => (d.id === id ? { ...d, description: value } : d)));
+  }
+
+  function handleTermsScroll(event: React.UIEvent<HTMLDivElement>) {
+    const el = event.currentTarget;
+    // Mala tolerancija (10px) - točan scrollHeight-clientHeight rijetko
+    // pogodi na dlaku zbog zaokruživanja, pa striktan >= zna promašiti.
+    if (el.scrollTop + el.clientHeight >= el.scrollHeight - 10) {
+      setTermsScrolledToBottom(true);
+    }
+  }
+
   const documentsComplete = Boolean(driverLicense.file && idDocument.file && phone.trim());
-  const photosComplete = REQUIRED_ANGLES.every((angle) => angles[angle].file);
+  const damagesComplete = damages.every((d) => d.part && d.file);
+  const photosComplete = REQUIRED_ANGLES.every((angle) => angles[angle].file) && damagesComplete;
 
   function goNext() {
     const idx = STEPS.indexOf(step);
@@ -163,6 +277,10 @@ export default function SigningWizardPage() {
 
   async function handleSubmit() {
     if (!driverLicense.file || !idDocument.file) return;
+    if (!termsAccepted) {
+      setSubmitError("Uvjeti najma moraju biti prihvaćeni.");
+      return;
+    }
     if (!signatureDataUrl) {
       setSubmitError("Potpis je obavezan.");
       return;
@@ -173,6 +291,9 @@ export default function SigningWizardPage() {
 
     const formData = new FormData();
     formData.append("phone", phone.trim());
+    if (address.trim()) formData.append("address", address.trim());
+    formData.append("termsAccepted", "true");
+    formData.append("termsVersion", TERMS_VERSION);
     formData.append("driverLicense", driverLicense.file);
     formData.append("idDocument", idDocument.file);
     REQUIRED_ANGLES.forEach((angle) => {
@@ -181,6 +302,13 @@ export default function SigningWizardPage() {
       if (slot.damageDescription.trim()) {
         formData.append(`damage_${angle}`, slot.damageDescription.trim());
       }
+    });
+    formData.append("damageCount", String(damages.length));
+    damages.forEach((d, i) => {
+      if (!d.part || !d.file) return;
+      formData.append(`damage_${i}_part`, d.part);
+      formData.append(`damage_${i}_photo`, d.file);
+      if (d.description.trim()) formData.append(`damage_${i}_description`, d.description.trim());
     });
     formData.append("signature", signatureDataUrl);
 
@@ -259,13 +387,19 @@ export default function SigningWizardPage() {
                 <input value={phone} onChange={(e) => setPhone(e.target.value)} required />
               </label>
               <label>
+                Adresa (opcionalno)
+                <input value={address} onChange={(e) => setAddress(e.target.value)} />
+              </label>
+              <label>
                 Vozačka dozvola (slika)
                 <input
                   type="file"
                   accept="image/*"
-                  onChange={(e) =>
-                    setDriverLicense((prev) => replaceFilePreview(prev, e.target.files?.[0] ?? null))
-                  }
+                  onChange={async (e) => {
+                    const raw = e.target.files?.[0] ?? null;
+                    const file = raw ? await compressImageFile(raw) : null;
+                    setDriverLicense((prev) => replaceFilePreview(prev, file));
+                  }}
                 />
               </label>
               {driverLicense.previewUrl && (
@@ -276,9 +410,11 @@ export default function SigningWizardPage() {
                 <input
                   type="file"
                   accept="image/*"
-                  onChange={(e) =>
-                    setIdDocument((prev) => replaceFilePreview(prev, e.target.files?.[0] ?? null))
-                  }
+                  onChange={async (e) => {
+                    const raw = e.target.files?.[0] ?? null;
+                    const file = raw ? await compressImageFile(raw) : null;
+                    setIdDocument((prev) => replaceFilePreview(prev, file));
+                  }}
                 />
               </label>
               {idDocument.previewUrl && (
@@ -322,11 +458,93 @@ export default function SigningWizardPage() {
                 );
               })}
             </div>
+
+            <h3 style={{ marginTop: "1.5rem" }}>Oštećenja (opcionalno)</h3>
+            <p className="muted">
+              Ako je vozilo oštećeno, odaberi koji dio i slikaj konkretno oštećenje. Možeš dodati
+              više oštećenja.
+            </p>
+            <div className="damage-list">
+              {damages.map((d) => (
+                <div key={d.id} className="damage-row">
+                  <select
+                    value={d.part}
+                    onChange={(e) => updateDamagePart(d.id, e.target.value as VehiclePart)}
+                  >
+                    <option value="" disabled>
+                      Odaberi dio vozila
+                    </option>
+                    {VEHICLE_PART_OPTIONS.map((part) => (
+                      <option key={part} value={part}>
+                        {VEHICLE_PART_LABELS[part]}
+                      </option>
+                    ))}
+                  </select>
+                  {d.previewUrl && <img src={d.previewUrl} alt="Slika oštećenja" />}
+                  <input
+                    type="file"
+                    accept="image/*"
+                    capture="environment"
+                    onChange={(e) => handleDamageFileChange(d.id, e.target.files?.[0] ?? null)}
+                  />
+                  <textarea
+                    placeholder="Opis oštećenja (opcionalno)"
+                    value={d.description}
+                    onChange={(e) => updateDamageDescription(d.id, e.target.value)}
+                  />
+                  <button
+                    type="button"
+                    className="btn btn-danger"
+                    onClick={() => removeDamageEntry(d.id)}
+                  >
+                    Ukloni oštećenje
+                  </button>
+                </div>
+              ))}
+            </div>
+            <button type="button" className="btn" onClick={addDamageEntry}>
+              + Dodaj još jedno oštećenje
+            </button>
+
             <div className="step-actions">
               <button className="btn" onClick={goBack}>
                 Natrag
               </button>
               <button className="btn btn-primary" disabled={!photosComplete} onClick={goNext}>
+                Dalje
+              </button>
+            </div>
+          </div>
+        )}
+
+        {step === "terms" && (
+          <div>
+            <h2>Uvjeti najma</h2>
+            <p className="muted">Pročitaj uvjete do kraja prije nego ih možeš prihvatiti.</p>
+            <div className="terms-box" onScroll={handleTermsScroll}>
+              {TERMS_TEXT.split("\n\n").map((paragraph, i) => (
+                <p key={i} style={{ marginBottom: "0.75rem", whiteSpace: "pre-line" }}>
+                  {paragraph}
+                </p>
+              ))}
+            </div>
+            <label style={{ flexDirection: "row", alignItems: "center", gap: "0.5rem", marginTop: "0.75rem" }}>
+              <input
+                type="checkbox"
+                checked={termsAccepted}
+                disabled={!termsScrolledToBottom}
+                onChange={(e) => setTermsAccepted(e.target.checked)}
+              />
+              Pročitao/la sam i prihvaćam uvjete najma
+            </label>
+            {!termsScrolledToBottom && (
+              <p className="muted">Doscrolaj do dna teksta da bi mogao/la prihvatiti uvjete.</p>
+            )}
+            <div className="step-actions">
+              <button className="btn" onClick={goBack}>
+                Natrag
+              </button>
+              <button className="btn btn-primary" disabled={!termsAccepted} onClick={goNext}>
                 Dalje
               </button>
             </div>
@@ -361,6 +579,12 @@ export default function SigningWizardPage() {
             <h2>Pregled i potpis</h2>
             <p className="muted">Telefon: {phone}</p>
             <p className="muted">Dokumenti i sve 4 slike vozila su spremni.</p>
+            <p className="muted">
+              {damages.length > 0
+                ? `Prijavljeno oštećenja: ${damages.length}.`
+                : "Nema prijavljenih oštećenja."}
+            </p>
+            <p className="muted">Uvjeti najma prihvaćeni.</p>
             {submitError && <p className="error">{submitError}</p>}
             <div className="step-actions">
               <button className="btn" onClick={goBack} disabled={submitting}>

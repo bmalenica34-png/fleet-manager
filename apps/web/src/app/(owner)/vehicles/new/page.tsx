@@ -2,25 +2,53 @@
 
 import { useRouter } from "next/navigation";
 import { useState } from "react";
+import { OTHER_VEHICLE_OPTION, VEHICLE_MAKES, VEHICLE_MODELS_BY_MAKE } from "@rent-a-car/api";
+
+const CURRENT_YEAR = new Date().getFullYear();
+const YEAR_OPTIONS = Array.from({ length: CURRENT_YEAR + 1 - 1980 + 1 }, (_, i) => CURRENT_YEAR + 1 - i);
 
 export default function NewVehiclePage() {
   const router = useRouter();
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
+  const [make, setMake] = useState("");
+  const [customMake, setCustomMake] = useState("");
+  const [model, setModel] = useState("");
+  const [customModel, setCustomModel] = useState("");
+  const [year, setYear] = useState("");
+
+  const isCustomMake = make === OTHER_VEHICLE_OPTION;
+  const isCustomModel = isCustomMake || model === OTHER_VEHICLE_OPTION;
+  const modelOptions = isCustomMake ? [] : (VEHICLE_MODELS_BY_MAKE[make] ?? []);
+
+  function handleMakeChange(value: string) {
+    setMake(value);
+    // Popis modela ovisi o marki - promjena marke poništava prije odabrani
+    // model (stari model vjerojatno ne postoji za novu marku).
+    setModel("");
+    setCustomModel("");
+  }
+
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setError(null);
+
+    const resolvedMake = isCustomMake ? customMake.trim() : make;
+    const resolvedModel = isCustomModel ? customModel.trim() : model;
+    if (!resolvedMake || !resolvedModel) {
+      setError("Odaberi ili upiši marku i model.");
+      return;
+    }
+
     setSubmitting(true);
 
     const formData = new FormData(event.currentTarget);
-    const year = formData.get("year");
-
     const registrationExpiresAt = formData.get("registrationExpiresAt");
 
     const payload = {
-      make: formData.get("make"),
-      model: formData.get("model"),
+      make: resolvedMake,
+      model: resolvedModel,
       year: year ? Number(year) : undefined,
       licensePlate: formData.get("licensePlate"),
       vin: formData.get("vin") || undefined,
@@ -51,15 +79,54 @@ export default function NewVehiclePage() {
       <form onSubmit={handleSubmit}>
         <label>
           Marka
-          <input name="make" required />
+          <select value={make} onChange={(e) => handleMakeChange(e.target.value)} required>
+            <option value="" disabled>
+              Odaberi marku
+            </option>
+            {VEHICLE_MAKES.map((m) => (
+              <option key={m} value={m}>
+                {m}
+              </option>
+            ))}
+            <option value={OTHER_VEHICLE_OPTION}>{OTHER_VEHICLE_OPTION}</option>
+          </select>
         </label>
+        {isCustomMake && (
+          <label>
+            Upiši marku
+            <input value={customMake} onChange={(e) => setCustomMake(e.target.value)} required />
+          </label>
+        )}
+
         <label>
           Model
-          <input name="model" required />
+          {isCustomModel ? (
+            <input value={customModel} onChange={(e) => setCustomModel(e.target.value)} required />
+          ) : (
+            <select value={model} onChange={(e) => setModel(e.target.value)} required disabled={!make}>
+              <option value="" disabled>
+                Odaberi model
+              </option>
+              {modelOptions.map((m) => (
+                <option key={m} value={m}>
+                  {m}
+                </option>
+              ))}
+              <option value={OTHER_VEHICLE_OPTION}>{OTHER_VEHICLE_OPTION}</option>
+            </select>
+          )}
         </label>
+
         <label>
           Godina
-          <input name="year" type="number" min={1950} />
+          <select value={year} onChange={(e) => setYear(e.target.value)}>
+            <option value="">Nepoznato</option>
+            {YEAR_OPTIONS.map((y) => (
+              <option key={y} value={y}>
+                {y}
+              </option>
+            ))}
+          </select>
         </label>
         <label>
           Registarske tablice

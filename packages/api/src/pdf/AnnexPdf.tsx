@@ -10,6 +10,7 @@ export interface AnnexPdfProps {
   };
   contract: {
     id: string;
+    number: number;
     dateFrom: Date;
     previousDateTo: Date;
   };
@@ -31,7 +32,7 @@ export function AnnexPdfDocument({ annex, contract, vehicle, client, signatureUr
       <Page size="A4" style={styles.page}>
         <Text style={styles.title}>Aneks ugovora o najmu - produženje</Text>
         <Text style={styles.subtitle}>
-          Uz ugovor broj: {contract.id} - aneks broj: {annex.id}
+          Uz ugovor broj: {contract.number} - aneks broj: {annex.id}
         </Text>
 
         <View style={styles.section}>

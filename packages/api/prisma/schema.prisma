@@ -85,6 +85,7 @@ model Client {
   oib               String   @unique
   email             String
   phone             String
+  address           String?
   driverLicenseKey  String?
   idDocumentKey     String?
   // Poveže se s Supabase auth accountom kad se klijent registrira/potvrdi.
@@ -110,7 +111,11 @@ enum ContractStatus {
 }
 
 model Contract {
-  id        String         @id @default(cuid())
+  id     String @id @default(cuid())
+  // Sekvencijalni broj ugovora, čitljiv za owner/klijenta (za razliku od
+  // cuid `id`-a) - prikazan na PDF-u i u UI popisima kao "broj ugovora".
+  number Int    @unique @default(autoincrement())
+
   vehicleId String
   vehicle   Vehicle        @relation(fields: [vehicleId], references: [id])
   clientId  String
@@ -127,6 +132,28 @@ model Contract {
 
   contractPdfKey String?
   protocolPdfKey String?
+
+  // Podaci za redizajnirani Contract PDF (dodano naknadno, nije bilo dio
+  // izvornog v1 scope-a - sva polja nullable). Owner unosi pri kreiranju
+  // ugovora (poznato prije primopredaje): pickupLocation, odometerStart,
+  // pricePerDay, excessAmount, paymentMethod. returnLocation/odometerEnd
+  // nemaju još ulazni flow (nema "povrat vozila" značajke u v1) - postavljaju
+  // se samo ručno dok ta funkcija ne postoji, PDF prikazuje "—" ako su null.
+  pickupLocation String?
+  returnLocation String?
+  odometerStart  Int?
+  odometerEnd    Int?
+  pricePerDay    Float?
+  excessAmount   Float?
+  paymentMethod  String?
+
+  // Prihvaćanje uvjeta najma (scroll-to-accept korak u signing wizardu,
+  // prije potpisa). termsAcceptedAt postavlja SERVER u trenutku obrade
+  // potpisanog submita (ne klijentski timestamp - pouzdaniji zapis "kad je
+  // stvarno primljeno"), termsVersion je verzija teksta koju je klijent
+  // vidio (za slučaj da se tekst uvjeta kasnije promijeni).
+  termsAcceptedAt DateTime?
+  termsVersion    String?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -156,6 +183,40 @@ enum PhotoAngle {
   other
 }
 
+// Koji je konkretan dio vozila oštećen - odvojeno od PhotoAngle (koji kut
+// je slika snimljena) jer oštećenje nije nužno vezano na jedan od 4
+// standardna kuta primopredaje. Strukturirano polje (ne slobodni tekst)
+// da bi se kasnije moglo filtrirati/pretraživati po dijelu vozila.
+enum VehiclePart {
+  front_bumper
+  rear_bumper
+  hood
+  trunk
+  roof
+  windshield
+  rear_window
+  left_front_door
+  left_rear_door
+  right_front_door
+  right_rear_door
+  left_front_fender
+  right_front_fender
+  left_rear_fender
+  right_rear_fender
+  left_mirror
+  right_mirror
+  left_front_wheel
+  right_front_wheel
+  left_rear_wheel
+  right_rear_wheel
+  headlight_left
+  headlight_right
+  taillight_left
+  taillight_right
+  interior
+  other
+}
+
 model HandoverPhoto {
   id       String @id @default(cuid())
   contractId String
@@ -169,6 +230,11 @@ model HandoverPhoto {
   angle             PhotoAngle
   key               String
   damageDescription String?
+
+  // Postavljeno samo za dodatne fotografije prijavljenog oštećenja (angle
+  // je tada "other") - koji dio vozila je oštećen, strukturirano polje.
+  // Null za standardne 4 slike primopredaje po kutovima.
+  damagedPart VehiclePart?
 
   createdAt DateTime @default(now())
 

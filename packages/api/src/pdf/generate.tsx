@@ -1,4 +1,5 @@
 import { renderToBuffer } from "@react-pdf/renderer";
+import "./fonts";
 import { ContractPdfDocument, type ContractPdfProps } from "./ContractPdf";
 import { ProtocolPdfDocument, type ProtocolPdfProps } from "./ProtocolPdf";
 import { AnnexPdfDocument, type AnnexPdfProps } from "./AnnexPdf";

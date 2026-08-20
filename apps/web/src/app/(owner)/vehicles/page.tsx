@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import type { VehicleDTO } from "@rent-a-car/api/server";
+import { formatDateHr } from "@rent-a-car/api";
 
 export default function VehiclesPage() {
   const [vehicles, setVehicles] = useState<VehicleDTO[]>([]);
@@ -61,7 +62,7 @@ export default function VehiclesPage() {
                 <td>{v.licensePlate}</td>
                 <td>
                   {v.registrationExpiresAt ? (
-                    new Date(v.registrationExpiresAt).toLocaleDateString("hr-HR")
+                    formatDateHr(v.registrationExpiresAt)
                   ) : (
                     <span className="muted">—</span>
                   )}
