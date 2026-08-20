@@ -4,8 +4,42 @@ Dinamički log stanja projekta. Ažurira se na kraju svake sesije. Za statičnu
 arhitekturu/konvencije vidi [CLAUDE.md](CLAUDE.md) — ovaj dokument je "što je
 gotovo i zašto", ne "kako treba izgledati".
 
-**Zadnje ažurirano:** 2026-08-20, nastavak iste sesije - četiri odvojena
-zadatka. (1) Potvrđeno i popravljeno: `pricePerDay` je sad stvarno obavezno
+**Zadnje ažurirano:** 2026-08-20, treći nastavak iste sesije - korisnik
+prijavio da su OBA "riješena" bugova iz prijašnjeg dijela sesije zapravo
+i dalje bila pokvarena na stvarnom uređaju, eksplicitno tražio da se ovaj
+put ne zaključuje "vjerojatno" nego dokaže izravnim mjerenjem prije prijave
+fixa. Oba su bila stvarni, ozbiljniji problemi nego prijašnja dijagnoza:
+**(A) Bug #36 (angle-grid) fix je bio potpuno ispravan, ali NIKAD deployan**
+- cijela sesija (i prijašnje sesije unatrag do 16.08.) je sjedila lokalno,
+necommitano. Dokazano fetchanjem stvarnog production CSS bundlea (nema
+`640px` u njemu). Riješeno: sve je commitano (jedan commit, vidi git log)
+i pushano (`git push` je prošao kroz auto-mode classifier tek nakon što je
+korisnik odobrio u chatu - Claude ne smije sam zaobići taj gate). **(B) Bug
+#37 - signing submit s DRUGIM emailom i dalje pada.** Prijašnja dijagnoza
+(shared owner/client email, vidi ograničenje #9) je bila pogrešna -
+ispravljeno. Pravi uzrok, dokazan `vercel logs` uvidom (0 POST /api/sign
+poziva u 24h unatoč dovršenom wizardu) + izravnim `curl` protiv produkcije
+(potvrđen `413 FUNCTION_PAYLOAD_TOO_LARGE`, stvaran odgovor ne
+pretpostavka): Vercelov tvrdi ~4.5MB limit za tijelo Serverless Function
+zahtjeva, probijen kad se dokumenti + 4 obavezna kuta + oštećenja zbroje
+čak i nakon postojeće client-side kompresije. **Fix: signing wizard
+prebačen na direct-to-storage upload** - klijent uploada svaki fajl
+izravno u Hetzner preko presigned PUT URL-a (novi `POST /api/sign/[token]/
+upload-url` endpoint) čim ga odabere, finalni submit šalje samo malen JSON
+s ključevima (ne više multipart s binarnim sadržajem) - platformski limit
+više nije relevantan. Verificirano PRAVIM end-to-end testom protiv
+stvarnog Hetznera (scratch Node skripta, ne browser - file input se ne
+može popuniti programatski kroz dostupne alate): upload 7 stvarnih
+fajlova, finalni submit `{"ok":true}`, DB potvrđuje `status: "signed"` +
+5 HandoverPhoto redaka + PDF-ovi generirani, presigned download URL
+potvrđuje da je fajl stvarno u Hetzneru (ne samo da je upload vratio 200).
+Test podaci obrisani nakon verifikacije. `tsc --noEmit` i `next build`
+čisti. Vidi bugove #36 (dodatak) i #37 za pun dokazni lanac, i
+ograničenje #9 (dodatak) za ispravak prijašnjeg pogrešnog zaključka.
+`/request-photos/[token]` dijeli isti rizik (manji, bez dokumenata) ali
+nije popravljen ovom sesijom.
+
+**Prijašnji dio iste sesije (potvrda prije ispravka):** (1) Potvrđeno i popravljeno: `pricePerDay` je sad stvarno obavezno
 polje (pozitivan broj) na kreiranju ugovora, i na webu i na mobileu -
 mobile input za `pricePerDay`/`excessAmount`/`paymentMethod`/`pickupLocation`/
 `odometerStart` uopće nije postojao prije ove sesije, dodan. (2) Bug #35 -
@@ -1284,6 +1318,104 @@ tražio da se zapamte jer bi se mogli ponoviti.
     jedna vrijednost (jedna kolona), 1280px → dvije vrijednosti
     (nepromijenjeno ponašanje na desktopu).
 
+    **Dodatak 2026-08-20 - korisnik prijavio da fix "ne radi" na stvarnom
+    Android telefonu, unatoč gornjoj potvrdi.** Provjera je bila neispravna
+    ne zato što je CSS pravilo krivo nego zato što desktop `getComputedStyle`
+    provjera nikad nije bila dokaz da je taj CSS uopće UŽIVO - potvrdila je
+    samo da je pravilo ispravno NAPISANO u lokalnom radnom stablu. Direktan
+    fetch stvarnog production CSS bundlea
+    (`https://fleet-manager-web-ten.vercel.app/_next/static/css/*.css`)
+    pokazao je `grid-template-columns:1fr 1fr` BEZ ikakvog `640px` u
+    datoteci - jer **ništa iz cijele sesije (uklj. ovaj fix) nije bilo
+    commitano/pushano od 16.08.** (`git log` je pokazao zadnji commit
+    prije početka ove sesije). Fix je uvijek bio ispravan, samo nikad nije
+    deployan. Riješeno commitom + pushom (vidi arhitektonsku odluku
+    "Deploy provjera prije prijave fixa" niže) - novi Vercel deploy
+    pokrenut, CSS bi trebao biti uživo nakon njega. **Pouka: za bug koji
+    korisnik prijavljuje sa stvarnog uređaja, prva provjera treba biti "je
+    li ovo uopće deployano", ne pretpostaviti da lokalni fix = live fix.**
+
+37. ⚠️ **Signing submit padao s "Greška prilikom slanja" i s drugim (ne
+    owner) email-om - Vercelov ~4.5MB tvrdi limit za tijelo Serverless
+    Function zahtjeva, ne shared-email ograničenje kako je prijašnja
+    dijagnoza (vidi ograničenje #9, dodatak) pogrešno pretpostavila.**
+    Korisnik je eksplicitno tražio da se ne zaključuje "vjerojatno" nego
+    da se potvrdi direktnim mjerenjem prije prijave fixa - potvrđeno u dva
+    koraka, oba izravno protiv produkcije (ne lokalnog dev servera, koji
+    nema taj limit):
+    1. `vercel logs` za zadnjih 24h nije pokazao NI JEDAN `POST
+       /api/sign/[token]` unatoč jasnim dokazima (GET pozivi, kreiranje
+       ugovora) da je korisnik prošao cijeli wizard - znak da Vercel
+       odbija zahtjev na platform razini PRIJE nego Lambda uopće starta
+       (takvi odbijeni zahtjevi se ne pojavljuju kao function-invocation
+       log).
+    2. Direktan `curl` POST ~5.6MB multipart tijela (8 fajlova ~700KB,
+       realistična veličina za dokumente + 4 obavezna kuta + 2 oštećenja
+       NAKON postojeće client-side kompresije) na pravi
+       `https://fleet-manager-web-ten.vercel.app/api/sign/[token]` vratio
+       je `413 Request Entity Too Large` / `FUNCTION_PAYLOAD_TOO_LARGE` -
+       stvaran, izmjeren odgovor, ne pretpostavka. Kontrolni test s ~2.1MB
+       tijelom (isti lažni token) je prošao platform sloj i vratio pravu
+       app-level JSON grešku, potvrđujući gdje je točno granica.
+       `compressImageFile` (1920px/0.82 JPEG) je provjeren i JEST
+       primijenjen na svaki fajl u ovom flowu (dokumenti, 4 kuta,
+       oštećenja) - problem nije "kompresija nedostaje negdje", nego da
+       zbroj više komprimiranih fajlova odjednom i dalje realno probija
+       platformski limit koji nema Next.js/aplikacijsku zaobilaznicu za
+       Node.js Serverless Function tijelo.
+
+    **Fix: signing wizard prebačen na direct-to-storage upload.** Umjesto
+    da se svi fajlovi šalju kao multipart kroz jedan Vercel function poziv,
+    klijent sad za svaki fajl (dokumenti, 4 obavezna kuta, svaka prijava
+    oštećenja) prvo traži presigned PUT URL
+    (`POST /api/sign/[token]/upload-url`, novi endpoint, token se provjerava
+    identično `resolveSigningContract`-u da netko s isteklim/iskorištenim
+    tokenom ne može izdavati upload URL-ove), zatim uploada bytes IZRAVNO
+    u Hetzner preko tog URL-a (`uploadToStorage()` u
+    `sign/[token]/page.tsx`) - upload se pokreće čim korisnik odabere fajl
+    (nakon kompresije), ne čeka finalni submit. Finalni
+    `POST /api/sign/[token]` sad šalje malen JSON (ključevi već uploadanih
+    fajlova + telefon/adresa/uvjeti/potpis kao base64 - potpis je
+    dovoljno malen da ostane inline), ne više multipart s binarnim
+    sadržajem - platformski limit više nije relevantan jer to tijelo
+    nikad ne sadrži slike. `completeSigning()` (server) više ne uploada
+    dokumente/slike sam (klijent je to već napravio) - samo uploada potpis
+    (mali PNG, nema smisla komplicirati) i sprema već dobivene ključeve u
+    bazu. Novi `packages/api/src/schemas/signing.ts`
+    (`signUploadRequestSchema`, `completeSigningRequestSchema`) - prati
+    postojeću konvenciju "sve server-side validacije kroz Zod u
+    packages/api" (CLAUDE.md). `getPresignedUploadUrl()` dodan u
+    `storage/hetzner.ts` (PutObjectCommand analogan postojećem
+    `getPresignedDownloadUrl`-u).
+
+    **Verifikacija: stvarni end-to-end test protiv pravog Hetznera, ne
+    samo typecheck/build.** `tsc --noEmit` čist na `packages/api` i
+    `apps/web`, `next build` uspješan (nova `/api/sign/[token]/upload-url`
+    ruta vidljiva u outputu). Browser-based UI test nije bio moguć (file
+    input ne može se popuniti programatski kroz dostupne Browser Pane
+    alate), pa je umjesto toga napravljen scratch Node skripta koja radi
+    IDENTIČAN redoslijed poziva kao stvarni klijent kod: traži upload URL
+    za svih 7 fajlova (2 dokumenta + 4 kuta + 1 oštećenje), PUT-a stvaran
+    1x1 JPEG na svaki (protiv pravog Hetzner API-ja, ne mocka), zatim
+    finalni JSON submit protiv lokalnog dev servera. Rezultat: `{"ok":true}`.
+    Potvrđeno upitom nad bazom da je `Contract.status` prešao u `"signed"`,
+    svih 5 `HandoverPhoto` redaka je kreirano s ispravnim ključevima
+    (uklj. `damagedPart`/`damageDescription` za oštećenje), `Client.
+    driverLicenseKey`/`idDocumentKey` spremljeni, PDF-ovi generirani
+    (`contractPdfKey`/`protocolPdfKey` popunjeni). Potvrđeno i da je
+    stvarni fajl (potpis) preuzimljiv natrag preko presigned download URL-a
+    (200, točan broj bajtova) - zatvara petlju da objekti stvarno postoje
+    u Hetzneru, ne samo da je upload poziv vratio 200. Test ugovor/klijent
+    i svih 10 uploadanih objekata u Hetzneru obrisani odmah nakon
+    verifikacije.
+
+    **Preostaje:** `/request-photos/[token]` dijeli isti
+    `compressImageFile` + multipart-submit obrazac za 4 obavezna kuta
+    (bez dokumenata/potpisa, pa manji tipičan payload, ali ista klasa
+    rizika ako se doda više slika) - nije popravljen ovom sesijom, kandidat
+    za brzi sljedeći fix istim obrascem ako se ikad pojavi isti simptom
+    tamo.
+
 ---
 
 ## 3. Arhitektonske odluke i zašto
@@ -1518,13 +1650,21 @@ ugovora dobilo je brojeve 1-16 u točnom kronološkom redoslijedu.
    završnog `prisma.contract.update` poziva; nula ugovora u bazi ima status
    `draft`, što isključuje neuhvaćenu grešku pri slanju kao uzrok). Klijent
    na tom ugovoru je `b.malenica34@gmail.com` - identičan `OWNER_EMAIL`.
-   Zaključak: nema dokaza stvarnog sloma u slanju; simptom je dosljedan s
-   ovim već poznatim ograničenjem (isti inbox, teško razlikovati/pronaći
-   client-facing mail među ownerovom poštom). Fix nije primijenjen jer
-   nema što popravljati na backend strani - preporuka korisniku: ponoviti
-   test sa stvarno različitim client emailom da se potvrdi radi li flow
-   uistinu, ili provjeriti spam/drugi tab istog inboxa za ovaj konkretan
-   mail.
+   Zaključak u tom trenutku: nema dokaza stvarnog sloma u slanju; simptom
+   je dosljedan s ovim već poznatim ograničenjem.
+
+   **✅ Ovaj zaključak je bio POGREŠAN - ispravljeno istog dana, druga
+   runda dijagnoze.** Korisnik je stvarno testirao s drugim (ne owner)
+   emailom i i dalje dobio grešku, pa je zatražio pravi dokaz umjesto
+   DB-posrednog zaključivanja. Pravi uzrok pronađen direktnim `vercel logs`
+   uvidom + izravnim `curl` testom protiv produkcije: Vercelov ~4.5MB
+   limit za tijelo Serverless Function zahtjeva (`413
+   FUNCTION_PAYLOAD_TOO_LARGE`), potpuno nepovezano sa shared-email
+   ograničenjem. Vidi bug #37 za pun dokazni lanac i fix (direct-to-storage
+   upload). **Pouka za buduće sesije: DB stanje ("status je sent, token
+   valjan") dokazuje da je taj KONKRETAN prijašnji pokušaj uspio, ne da
+   NOVI prijavljeni pokušaj ne može biti pravi bug - closed-status
+   podudarnost s poznatim ograničenjem je korelacija, ne dokaz uzroka.**
 
 ---
 

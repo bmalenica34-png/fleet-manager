@@ -93,7 +93,22 @@ interface ContractSummary {
 interface FilePreview {
   file: File | null;
   previewUrl: string | null;
+  // Ključ već uploadanog fajla u Hetzneru (presigned PUT, izravno s
+  // klijenta - vidi uploadToStorage niže i bug #37 u PROGRESS.md). null dok
+  // upload nije završio - "Dalje"/submit ostaju blokirani dok god je ovo
+  // null za obavezne fajlove, ne samo dok `file` nije postavljen.
+  key: string | null;
+  uploading: boolean;
+  uploadError: string | null;
 }
+
+const EMPTY_FILE_PREVIEW: FilePreview = {
+  file: null,
+  previewUrl: null,
+  key: null,
+  uploading: false,
+  uploadError: null,
+};
 
 interface AngleSlot extends FilePreview {
   damageDescription: string;
@@ -117,18 +132,18 @@ export default function SigningWizardPage() {
 
   const [phone, setPhone] = useState("");
   const [address, setAddress] = useState("");
-  const [driverLicense, setDriverLicense] = useState<FilePreview>({ file: null, previewUrl: null });
-  const [idDocument, setIdDocument] = useState<FilePreview>({ file: null, previewUrl: null });
+  const [driverLicense, setDriverLicense] = useState<FilePreview>(EMPTY_FILE_PREVIEW);
+  const [idDocument, setIdDocument] = useState<FilePreview>(EMPTY_FILE_PREVIEW);
 
   const [angles, setAngles] = useState<Record<PhotoAngle, AngleSlot>>({
-    front: { file: null, previewUrl: null, damageDescription: "" },
-    back: { file: null, previewUrl: null, damageDescription: "" },
-    left: { file: null, previewUrl: null, damageDescription: "" },
-    right: { file: null, previewUrl: null, damageDescription: "" },
-    interior_dashboard: { file: null, previewUrl: null, damageDescription: "" },
-    interior_seats: { file: null, previewUrl: null, damageDescription: "" },
-    odometer: { file: null, previewUrl: null, damageDescription: "" },
-    other: { file: null, previewUrl: null, damageDescription: "" },
+    front: { ...EMPTY_FILE_PREVIEW, damageDescription: "" },
+    back: { ...EMPTY_FILE_PREVIEW, damageDescription: "" },
+    left: { ...EMPTY_FILE_PREVIEW, damageDescription: "" },
+    right: { ...EMPTY_FILE_PREVIEW, damageDescription: "" },
+    interior_dashboard: { ...EMPTY_FILE_PREVIEW, damageDescription: "" },
+    interior_seats: { ...EMPTY_FILE_PREVIEW, damageDescription: "" },
+    odometer: { ...EMPTY_FILE_PREVIEW, damageDescription: "" },
+    other: { ...EMPTY_FILE_PREVIEW, damageDescription: "" },
   });
 
   const [damages, setDamages] = useState<DamageEntry[]>([]);
@@ -179,10 +194,46 @@ export default function SigningWizardPage() {
       URL.revokeObjectURL(prev.previewUrl);
       createdUrlsRef.current.delete(prev.previewUrl);
     }
-    if (!file) return { file: null, previewUrl: null };
+    if (!file) return EMPTY_FILE_PREVIEW;
     const url = URL.createObjectURL(file);
     createdUrlsRef.current.add(url);
-    return { file, previewUrl: url };
+    return { file, previewUrl: url, key: null, uploading: false, uploadError: null };
+  }
+
+  /**
+   * Uploada fajl izravno u Hetzner preko presigned PUT URL-a, mimo Vercel
+   * funkcijskog tijela - vidi bug #37 u PROGRESS.md. Prijašnji pristup
+   * (svi fajlovi u jednom multipart submitu) je udarao u Vercelov tvrdi
+   * ~4.5MB limit za tijelo zahtjeva čim bi se dokumenti + 4 slike +
+   * oštećenja zbrojili, i to bi se dogodilo PRIJE nego bilo koji app kod
+   * uopće proradi (413 na platform razini, bez loga u funkciji).
+   */
+  async function uploadToStorage(
+    file: File,
+    purpose: "driverLicense" | "idDocument" | "photo" | "damagePhoto",
+    angle?: PhotoAngle
+  ): Promise<string> {
+    const urlRes = await fetch(`/api/sign/${token}/upload-url`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        purpose,
+        filename: file.name,
+        contentType: file.type || "image/jpeg",
+        angle,
+      }),
+    });
+    if (!urlRes.ok) throw new Error("upload_url_failed");
+    const { key, uploadUrl } = await urlRes.json();
+
+    const putRes = await fetch(uploadUrl, {
+      method: "PUT",
+      headers: { "Content-Type": file.type || "image/jpeg" },
+      body: file,
+    });
+    if (!putRes.ok) throw new Error("upload_failed");
+
+    return key as string;
   }
 
   async function handleAngleFileChange(angle: PhotoAngle, rawFile: File | null) {
@@ -191,6 +242,53 @@ export default function SigningWizardPage() {
       ...prev,
       [angle]: { ...replaceFilePreview(prev[angle], file), damageDescription: prev[angle].damageDescription },
     }));
+    if (!file) return;
+
+    setAngles((prev) => ({ ...prev, [angle]: { ...prev[angle], uploading: true, uploadError: null } }));
+    try {
+      const key = await uploadToStorage(file, "photo", angle);
+      setAngles((prev) =>
+        prev[angle].file === file ? { ...prev, [angle]: { ...prev[angle], key, uploading: false } } : prev
+      );
+    } catch {
+      setAngles((prev) =>
+        prev[angle].file === file
+          ? { ...prev, [angle]: { ...prev[angle], uploading: false, uploadError: "Upload nije uspio. Pokušaj ponovno." } }
+          : prev
+      );
+    }
+  }
+
+  async function handleDriverLicenseChange(rawFile: File | null) {
+    const file = rawFile ? await compressImageFile(rawFile) : null;
+    setDriverLicense((prev) => replaceFilePreview(prev, file));
+    if (!file) return;
+
+    setDriverLicense((prev) => ({ ...prev, uploading: true, uploadError: null }));
+    try {
+      const key = await uploadToStorage(file, "driverLicense");
+      setDriverLicense((prev) => (prev.file === file ? { ...prev, key, uploading: false } : prev));
+    } catch {
+      setDriverLicense((prev) =>
+        prev.file === file ? { ...prev, uploading: false, uploadError: "Upload nije uspio. Pokušaj ponovno." } : prev
+      );
+    }
+  }
+
+  async function handleIdDocumentChange(rawFile: File | null) {
+    const file = rawFile ? await compressImageFile(rawFile) : null;
+    setIdDocument((prev) => replaceFilePreview(prev, file));
+    if (!file) return;
+
+    setIdDocument((prev) => ({ ...prev, uploading: true, uploadError: null }));
+    try {
+      const key = await uploadToStorage(file, "idDocument");
+      setIdDocument((prev) => (prev.file === file ? { ...prev, key, uploading: false } : prev));
+    } catch {
+      setIdDocument((prev) =>
+        prev.file === file ? { ...prev, uploading: false, uploadError: "Upload nije uspio. Pokušaj ponovno." } : prev
+      );
+    }
   }
 
   function handleAngleDamageChange(angle: PhotoAngle, value: string) {
@@ -200,7 +298,7 @@ export default function SigningWizardPage() {
   function addDamageEntry() {
     setDamages((prev) => [
       ...prev,
-      { id: crypto.randomUUID(), part: "", file: null, previewUrl: null, description: "" },
+      { id: crypto.randomUUID(), part: "", ...EMPTY_FILE_PREVIEW, description: "" },
     ]);
   }
 
@@ -224,6 +322,23 @@ export default function SigningWizardPage() {
     setDamages((prev) =>
       prev.map((d) => (d.id === id ? { ...d, ...replaceFilePreview(d, file) } : d))
     );
+    if (!file) return;
+
+    setDamages((prev) => prev.map((d) => (d.id === id ? { ...d, uploading: true, uploadError: null } : d)));
+    try {
+      const key = await uploadToStorage(file, "damagePhoto");
+      setDamages((prev) =>
+        prev.map((d) => (d.id === id && d.file === file ? { ...d, key, uploading: false } : d))
+      );
+    } catch {
+      setDamages((prev) =>
+        prev.map((d) =>
+          d.id === id && d.file === file
+            ? { ...d, uploading: false, uploadError: "Upload nije uspio. Pokušaj ponovno." }
+            : d
+        )
+      );
+    }
   }
 
   function updateDamageDescription(id: string, value: string) {
@@ -239,9 +354,9 @@ export default function SigningWizardPage() {
     }
   }
 
-  const documentsComplete = Boolean(driverLicense.file && idDocument.file && phone.trim());
-  const damagesComplete = damages.every((d) => d.part && d.file);
-  const photosComplete = REQUIRED_ANGLES.every((angle) => angles[angle].file) && damagesComplete;
+  const documentsComplete = Boolean(driverLicense.key && idDocument.key && phone.trim());
+  const damagesComplete = damages.every((d) => d.part && d.key);
+  const photosComplete = REQUIRED_ANGLES.every((angle) => angles[angle].key) && damagesComplete;
 
   function goNext() {
     const idx = STEPS.indexOf(step);
@@ -276,7 +391,7 @@ export default function SigningWizardPage() {
   }
 
   async function handleSubmit() {
-    if (!driverLicense.file || !idDocument.file) return;
+    if (!driverLicense.key || !idDocument.key) return;
     if (!termsAccepted) {
       setSubmitError("Uvjeti najma moraju biti prihvaćeni.");
       return;
@@ -289,30 +404,38 @@ export default function SigningWizardPage() {
     setSubmitting(true);
     setSubmitError(null);
 
-    const formData = new FormData();
-    formData.append("phone", phone.trim());
-    if (address.trim()) formData.append("address", address.trim());
-    formData.append("termsAccepted", "true");
-    formData.append("termsVersion", TERMS_VERSION);
-    formData.append("driverLicense", driverLicense.file);
-    formData.append("idDocument", idDocument.file);
-    REQUIRED_ANGLES.forEach((angle) => {
-      const slot = angles[angle];
-      if (slot.file) formData.append(`photo_${angle}`, slot.file);
-      if (slot.damageDescription.trim()) {
-        formData.append(`damage_${angle}`, slot.damageDescription.trim());
-      }
-    });
-    formData.append("damageCount", String(damages.length));
-    damages.forEach((d, i) => {
-      if (!d.part || !d.file) return;
-      formData.append(`damage_${i}_part`, d.part);
-      formData.append(`damage_${i}_photo`, d.file);
-      if (d.description.trim()) formData.append(`damage_${i}_description`, d.description.trim());
-    });
-    formData.append("signature", signatureDataUrl);
+    // Fajlovi su već uploadani izravno u Hetzner tijekom čekiranja koraka
+    // (vidi uploadToStorage) - ovaj submit šalje samo male ključeve/
+    // metapodatke kao JSON, ne binarni sadržaj. Vidi bug #37 u PROGRESS.md.
+    const photos = REQUIRED_ANGLES.map((angle) => ({
+      angle,
+      key: angles[angle].key as string,
+      damageDescription: angles[angle].damageDescription.trim() || undefined,
+    }));
 
-    const res = await fetch(`/api/sign/${token}`, { method: "POST", body: formData });
+    const damagePhotos = damages
+      .filter((d) => d.part && d.key)
+      .map((d) => ({
+        part: d.part as VehiclePart,
+        key: d.key as string,
+        description: d.description.trim() || undefined,
+      }));
+
+    const res = await fetch(`/api/sign/${token}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        phone: phone.trim(),
+        address: address.trim() || undefined,
+        termsAccepted: true,
+        termsVersion: TERMS_VERSION,
+        driverLicenseKey: driverLicense.key,
+        idDocumentKey: idDocument.key,
+        photos,
+        damagePhotos,
+        signature: signatureDataUrl,
+      }),
+    });
     setSubmitting(false);
 
     if (!res.ok) {
@@ -395,31 +518,27 @@ export default function SigningWizardPage() {
                 <input
                   type="file"
                   accept="image/*"
-                  onChange={async (e) => {
-                    const raw = e.target.files?.[0] ?? null;
-                    const file = raw ? await compressImageFile(raw) : null;
-                    setDriverLicense((prev) => replaceFilePreview(prev, file));
-                  }}
+                  onChange={(e) => handleDriverLicenseChange(e.target.files?.[0] ?? null)}
                 />
               </label>
               {driverLicense.previewUrl && (
                 <img src={driverLicense.previewUrl} alt="Preview vozačke" style={{ maxWidth: "200px", borderRadius: "6px" }} />
               )}
+              {driverLicense.uploading && <p className="muted">Uploadam...</p>}
+              {driverLicense.uploadError && <p className="error">{driverLicense.uploadError}</p>}
               <label>
                 Osobna iskaznica (slika)
                 <input
                   type="file"
                   accept="image/*"
-                  onChange={async (e) => {
-                    const raw = e.target.files?.[0] ?? null;
-                    const file = raw ? await compressImageFile(raw) : null;
-                    setIdDocument((prev) => replaceFilePreview(prev, file));
-                  }}
+                  onChange={(e) => handleIdDocumentChange(e.target.files?.[0] ?? null)}
                 />
               </label>
               {idDocument.previewUrl && (
                 <img src={idDocument.previewUrl} alt="Preview osobne" style={{ maxWidth: "200px", borderRadius: "6px" }} />
               )}
+              {idDocument.uploading && <p className="muted">Uploadam...</p>}
+              {idDocument.uploadError && <p className="error">{idDocument.uploadError}</p>}
             </form>
             <div className="step-actions">
               <span />
@@ -438,7 +557,7 @@ export default function SigningWizardPage() {
               {REQUIRED_ANGLES.map((angle) => {
                 const slot = angles[angle];
                 return (
-                  <div key={angle} className={`angle-slot${slot.file ? " done" : ""}`}>
+                  <div key={angle} className={`angle-slot${slot.key ? " done" : ""}`}>
                     {slot.previewUrl ? (
                       <img src={slot.previewUrl} alt={ANGLE_LABELS[angle]} />
                     ) : null}
@@ -449,6 +568,8 @@ export default function SigningWizardPage() {
                       capture="environment"
                       onChange={(e) => handleAngleFileChange(angle, e.target.files?.[0] ?? null)}
                     />
+                    {slot.uploading && <p className="muted">Uploadam...</p>}
+                    {slot.uploadError && <p className="error">{slot.uploadError}</p>}
                     <textarea
                       placeholder="Opis oštećenja (opcionalno)"
                       value={slot.damageDescription}
@@ -487,6 +608,8 @@ export default function SigningWizardPage() {
                     capture="environment"
                     onChange={(e) => handleDamageFileChange(d.id, e.target.files?.[0] ?? null)}
                   />
+                  {d.uploading && <p className="muted">Uploadam...</p>}
+                  {d.uploadError && <p className="error">{d.uploadError}</p>}
                   <textarea
                     placeholder="Opis oštećenja (opcionalno)"
                     value={d.description}

@@ -4,6 +4,7 @@ export * from "./schemas/contract";
 export * from "./schemas/handoverPhoto";
 export * from "./schemas/annex";
 export * from "./schemas/photoRequest";
+export * from "./schemas/signing";
 export * from "./lib/dateFormat";
 export * from "./data/vehicleCatalog";
 

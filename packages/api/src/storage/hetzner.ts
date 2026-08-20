@@ -77,6 +77,25 @@ export async function getPresignedDownloadUrl(
   );
 }
 
+/**
+ * Presigned PUT URL - klijent uploada bytes izravno u Hetzner, mimo Vercel
+ * Serverless Function tijela zahtjeva (koje ima tvrdi ~4.5MB limit,
+ * neovisan o bilo kojoj Next.js postavci - vidi bug #37 u PROGRESS.md).
+ * Koristi se za signing wizard (dokumenti + slike vozila), gdje više
+ * fajlova odjednom lako probije taj limit.
+ */
+export async function getPresignedUploadUrl(
+  key: string,
+  contentType: string,
+  expiresInSeconds = 900
+): Promise<string> {
+  return getSignedUrl(
+    getClient(),
+    new PutObjectCommand({ Bucket: getBucket(), Key: key, ContentType: contentType }),
+    { expiresIn: expiresInSeconds }
+  );
+}
+
 export async function deleteObject(key: string): Promise<void> {
   await getClient().send(
     new DeleteObjectCommand({ Bucket: getBucket(), Key: key })
