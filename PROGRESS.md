@@ -4,7 +4,24 @@ Dinamički log stanja projekta. Ažurira se na kraju svake sesije. Za statičnu
 arhitekturu/konvencije vidi [CLAUDE.md](CLAUDE.md) — ovaj dokument je "što je
 gotovo i zašto", ne "kako treba izgledati".
 
-**Zadnje ažurirano:** 2026-08-20, treći nastavak iste sesije - korisnik
+**Zadnje ažurirano:** 2026-08-20, četvrti nastavak - bug #37 fix (direct-
+to-storage upload) je i dalje pucao na pravom uređaju, sad kod PUT koraka.
+Pravi uzrok: Hetzner bucket nije imao NIKAKVU CORS konfiguraciju, pa je
+svaki cross-origin PUT iz pravog browsera bio blokiran (server-to-server
+testovi iz prijašnje verifikacije - curl, Node fetch - ne provode CORS pa
+su lažno prošli). Reproducirano i potvrđeno izravno kroz Claude Browser
+Pane (pravi Chromium, stvaran production origin) - uhvaćena točna
+CORS greška u konzoli. Fix: CORS politika postavljena na bucket (dva
+pokušaja - uska politika je popravila OPTIONS preflight ali ne i stvaran
+PUT odgovor, šira politika je popravila oboje, potvrđeno ponovljenim
+real-browser testom). Perzistirano kao maintained script
+(`packages/api/scripts/configure-hetzner-cors.mjs`) jer je ovo bucket-level
+konfiguracija izvan gitanog koda. Vidi bug #38 za pun dokazni lanac.
+Detalji ispod su iz PRIJAŠNJEG (nedovoljnog) kruga verifikacije - ostavljeno
+netaknuto radi kronologije, ali pouka iz bug #38 primjenjuje se ubuduće:
+server-to-server test nije dovoljan za browser-facing cross-origin flow.
+
+**Prijašnji dio iste sesije (treći nastavak):** korisnik
 prijavio da su OBA "riješena" bugova iz prijašnjeg dijela sesije zapravo
 i dalje bila pokvarena na stvarnom uređaju, eksplicitno tražio da se ovaj
 put ne zaključuje "vjerojatno" nego dokaže izravnim mjerenjem prije prijave
@@ -1409,12 +1426,91 @@ tražio da se zapamte jer bi se mogli ponoviti.
     i svih 10 uploadanih objekata u Hetzneru obrisani odmah nakon
     verifikacije.
 
+    **⚠️ Ova verifikacija NIJE bila dovoljna - propustila je stvaran bug.**
+    Node-based skripta koristi Node-ov `fetch`, koji NE provodi CORS
+    (preflight OPTIONS, Origin-based blokiranje odgovora) - to je isključivo
+    browser sigurnosni mehanizam. Zato je test prošao dok je pravi uređaj
+    (pravi browser) pucao na PUT koraku. Vidi bug #38 za pravi uzrok i fix.
+    **Pouka: server-to-server simulacija (curl/Node fetch) NIKAD nije
+    dovoljna za potvrdu browser-facing upload flowa koji ide na
+    cross-origin URL - mora se testirati kroz stvaran browser (ili barem
+    Chromium-based automatizaciju koja provodi CORS), inače se cijela ova
+    klasa buga sustavno promašuje.**
+
     **Preostaje:** `/request-photos/[token]` dijeli isti
     `compressImageFile` + multipart-submit obrazac za 4 obavezna kuta
     (bez dokumenata/potpisa, pa manji tipičan payload, ali ista klasa
     rizika ako se doda više slika) - nije popravljen ovom sesijom, kandidat
     za brzi sljedeći fix istim obrascem ako se ikad pojavi isti simptom
     tamo.
+
+38. ⚠️ **Nastavak bug #37 - presigned upload je i dalje pucao na PRAVOM
+    uređaju čak i nakon deploya, s specifičnom porukom "Upload nije
+    uspio" (iz PUT koraka, ne finalnog submita).** Korisnik je ispravno
+    posumnjao da je uzrok CORS, i eksplicitno tražio pravi HTTP status/
+    error prije bilo kakvog fixa (isto pravilo kao bug #36-dodatak - ne
+    zaključivati iz posrednih znakova). **Reprodukcija napravljena kroz
+    Claude Browser Pane** (stvaran Chromium, provodi CORS za razliku od
+    curl/Node fetch - vidi pouku u bugu #37 gore) - otvorena stvarna
+    `/sign/[token]` stranica na produkcijskom originu
+    (`fleet-manager-web-ten.vercel.app`), pa izvršen `fetch()` UNUTAR
+    stranice (isti kod-put kao `uploadToStorage()`, samo ručno pozvan
+    preko `javascript_tool`-a radi izolacije koraka). Rezultat: `TypeError:
+    Failed to fetch` na PUT-u, a konzola je otkrila pravi uzrok:
+    ```
+    Access to fetch at 'https://fsn1.your-objectstorage.com/...' from
+    origin 'https://fleet-manager-web-ten.vercel.app' has been blocked by
+    CORS policy: Response to preflight request doesn't pass access
+    control check: No 'Access-Control-Allow-Origin' header is present on
+    the requested resource.
+    ```
+    Direktna provjera (`GetBucketCorsCommand`) potvrdila je da Hetzner
+    bucket **nije imao NIKAKVU CORS konfiguraciju** (`NoSuchCORSConfiguration`)
+    - očekivano, jer dosad ništa u appu nije radilo cross-origin PUT/GET
+    preko fetcha (downloadi idu kroz `<a href>`/`<img src>`, koji ne
+    provode CORS).
+
+    **Fix, u dva koraka (prvi pokušaj nije bio dovoljan - i to potvrđeno
+    mjerenjem, ne pretpostavkom):**
+    1. Prvi pokušaj: uska CORS politika (`AllowedMethods: [PUT]`,
+       `AllowedHeaders: [content-type]`). Rezultat provjeren `curl -i -X
+       OPTIONS` s `Origin`/`Access-Control-Request-*` headerima - preflight
+       JE ispravno odgovarao s `access-control-allow-origin`. Ali stvaran
+       `curl -i -X PUT` (s `Origin` headerom, simulira što browser šalje
+       nakon uspješnog preflighta) na isti presigned URL vratio je `200 OK`
+       (upload je stvarno uspio server-side) ali BEZ
+       `access-control-allow-origin` u odgovoru - po CORS spec-u, browser
+       mora odbaciti i takav odgovor iako je HTTP status uredan, jer
+       nedostaje header na SAMOM zahtjevu (ne samo na preflightu). Ponovljen
+       real-browser test - i dalje `Failed to fetch`, potvrdio da uska
+       politika nije dovoljna.
+    2. Širi pravilo riješio problem: `AllowedMethods: [GET, PUT, POST,
+       HEAD]`, `AllowedHeaders: ["*"]`, dodan `ExposeHeaders: [ETag]`.
+       Točan razlog zašto uža verzija nije radila na Hetznerovom Ceph RGW
+       backendu (vidljivo iz `x-debug-bucket`/`ceph5` u response headerima)
+       nije dublje istražen - poznata je kategorija Ceph RGW CORS
+       implementacijskih nedosljednosti između preflight i stvarnog
+       odgovora, ali točan mehanizam ovdje nije potvrđen, samo da šire
+       pravilo radi. Ponovljen identičan real-browser test (Browser Pane,
+       stvaran production origin) - `PUT status: 200, PUT ok: true`, bez
+       ijedne CORS greške u konzoli. Zatim ponovljen i za `photo`/`front`
+       purpose (drugi kod-put istog `uploadToStorage()`-a) - identičan
+       uspjeh.
+
+    **Ovo je infrastrukturna promjena, NE dio gitanog koda** - CORS
+    politika živi na samom Hetzner bucketu, nije u repou. Perzistirano kao
+    `packages/api/scripts/configure-hetzner-cors.mjs` (idempotentan,
+    siguran za re-run) da se ne izgubi i da postoji jasan trag što točno
+    treba ponovno pokrenuti ako se bucket ikad rekreira ili doda novi
+    produkcijski domain (npr. custom domain umjesto `*.vercel.app` aliasa -
+    tad MORA se dodati u `allowedOrigins` popis u scripti i ponovno
+    pokrenuti). Primijenjeno izravno na produkcijski bucket (isti bucket
+    koji dev i produkcija dijele, kao i baza).
+
+    Test podaci (scratch ugovor/klijent kreiran za ovaj real-browser test,
+    svi uploadani probni objekti) obrisani nakon verifikacije - vidi
+    `ListObjectsV2`/`DeleteObjects` po prefiksu umjesto ručnog nabrajanja
+    ključeva, čišće za višestruke probne uploade tijekom debugiranja.
 
 ---
 
