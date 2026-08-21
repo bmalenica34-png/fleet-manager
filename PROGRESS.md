@@ -4,7 +4,15 @@ Dinamički log stanja projekta. Ažurira se na kraju svake sesije. Za statičnu
 arhitekturu/konvencije vidi [CLAUDE.md](CLAUDE.md) — ovaj dokument je "što je
 gotovo i zašto", ne "kako treba izgledati".
 
-**Zadnje ažurirano:** 2026-08-20, četvrti nastavak - bug #37 fix (direct-
+**Zadnje ažurirano:** 2026-08-21, peti nastavak - preventivno primijenjen
+isti direct-to-storage + CORS fix (bugovi #37/#38) na
+`/request-photos/[token]` (bug #39), prije nego je taj flow stvarno pukao
+na produkciji. Ovaj put testirano PRAVIM browserom od početka (Claude
+Browser Pane, ne Node/curl) - lekcija iz buga #38 primijenjena unaprijed.
+Čisto web promjena, `apps/mobile` nedirano. Sljedeći korak: Tier 2 backlog
+(OCR ekstrakcija + generator punomoći).
+
+**Prijašnji dio iste sesije (četvrti nastavak):** bug #37 fix (direct-
 to-storage upload) je i dalje pucao na pravom uređaju, sad kod PUT koraka.
 Pravi uzrok: Hetzner bucket nije imao NIKAKVU CORS konfiguraciju, pa je
 svaki cross-origin PUT iz pravog browsera bio blokiran (server-to-server
@@ -1440,9 +1448,9 @@ tražio da se zapamte jer bi se mogli ponoviti.
     **Preostaje:** `/request-photos/[token]` dijeli isti
     `compressImageFile` + multipart-submit obrazac za 4 obavezna kuta
     (bez dokumenata/potpisa, pa manji tipičan payload, ali ista klasa
-    rizika ako se doda više slika) - nije popravljen ovom sesijom, kandidat
-    za brzi sljedeći fix istim obrascem ako se ikad pojavi isti simptom
-    tamo.
+    rizika ako se doda više slika) - nije popravljen ovom sesijom.
+    **✅ Popravljeno u bugu #39 (sljedeća sesija) - isti direct-to-storage
+    obrazac primijenjen i tamo.**
 
 38. ⚠️ **Nastavak bug #37 - presigned upload je i dalje pucao na PRAVOM
     uređaju čak i nakon deploya, s specifičnom porukom "Upload nije
@@ -1511,6 +1519,58 @@ tražio da se zapamte jer bi se mogli ponoviti.
     svi uploadani probni objekti) obrisani nakon verifikacije - vidi
     `ListObjectsV2`/`DeleteObjects` po prefiksu umjesto ručnog nabrajanja
     ključeva, čišće za višestruke probne uploade tijekom debugiranja.
+
+39. ✅ **Isti direct-to-storage + CORS fix (bugovi #37/#38) primijenjen na
+    `/request-photos/[token]`**, na korisnikov eksplicitan zahtjev (ista
+    klasa rizika - Vercel body limit + presigned PUT CORS - identificirana,
+    a još nije udarila kao stvaran incident tamo). Infrastrukturna strana
+    (CORS na Hetzner bucketu) nije trebala dodatan rad - `bug #38`-ov fix
+    već pokriva sve app origine, uklj. `localhost:3000` korišten za ovaj
+    test.
+
+    **App-side refactor, identičan sign-flow obrascu:**
+    - `packages/api/src/schemas/photoRequest.ts`: novi
+      `photoRequestUploadRequestSchema` (traži upload URL po slici) i
+      `completePhotoRequestRequestSchema` (finalni JSON submit - ključevi
+      umjesto binarnog sadržaja).
+    - `packages/api/src/server/photoRequests.ts`: nova
+      `createPhotoRequestUploadUrl()` (isti token-check obrazac kao
+      `resolvePhotoRequest`), `completePhotoRequest()` više ne uploada
+      ništa sam (nema više ni signature-a za uploadati kao kod signing
+      flowa - ovaj flow nema potpis - pa je server strana sad ČISTO
+      spremanje već dobivenih ključeva u bazu, bez ijednog S3 poziva).
+    - Novi `apps/web/src/app/api/photo-requests/[token]/upload-url/route.ts`.
+    - `apps/web/src/app/api/photo-requests/[token]/route.ts`: POST prebačen
+      s `request.formData()` na `request.json()` + zod validacija.
+    - `apps/web/src/app/request-photos/[token]/page.tsx`: dodan
+      `compressImageFile` (usput otkriveno da ovaj flow NIKAD nije
+      kompresirao slike, za razliku od signing wizarda - sad ujednačeno),
+      per-slot `key`/`uploading`/`uploadError` state (identičan
+      `AngleSlot` obrazac kao `sign/[token]/page.tsx`), `uploadToStorage()`
+      helper repliciran lokalno (isti kod kao u sign pageu, namjerno NE
+      izvučen u dijeljeni modul - ovaj projekt već drži svaki
+      signing/photo-request wizard kao samostalnu stranicu, vidi
+      duplicirane `ANGLE_LABELS`/`REQUIRED_ANGLES` konstante koje su
+      postojale i prije ovog fixa).
+
+    **Verifikacija: STVARAN browser, ne Node/curl - naučena lekcija iz
+    bug #38 primijenjena od početka ovaj put, ne tek nakon što je test
+    pao na uređaju.** Claude Browser Pane (pravi Chromium) otvorio pravu
+    `/request-photos/[token]` stranicu na lokalnom dev serveru
+    (`localhost:3000`, u CORS allowlisti), izvršio identičan
+    `uploadToStorage()`-ekvivalent kod preko `javascript_tool`-a za sve
+    4 obavezna kuta - svaki `upload-url` poziv 200, svaki PUT na Hetzner
+    200 `ok=true`, konzola bez ijedne CORS/network greške. Finalni JSON
+    submit kroz isti real-browser kontekst - `{"ok":true}`. Potvrđeno
+    upitom nad bazom: `PhotoRequest.fulfilledAt` postavljen,
+    `requestToken` invalidiran (null), svih 4 `HandoverPhoto` retka
+    kreirano s ispravnim ključevima i opisom oštećenja. Test
+    `PhotoRequest` i svi uploadani objekti obrisani nakon verifikacije.
+
+    `tsc --noEmit` čist na `packages/api` i `apps/web`, `next build`
+    uspješan (nova `/api/photo-requests/[token]/upload-url` ruta vidljiva
+    u outputu). **Isključivo web promjena** (`apps/web`, `packages/api`) -
+    `apps/mobile` nije dirano, nije potreban novi EAS build.
 
 ---
 

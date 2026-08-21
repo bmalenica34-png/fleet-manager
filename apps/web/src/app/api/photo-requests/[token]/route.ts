@@ -1,10 +1,8 @@
 import { NextResponse } from "next/server";
 import { completePhotoRequest, resolvePhotoRequest } from "@rent-a-car/api/server";
-import type { PhotoAngle } from "@rent-a-car/api";
+import { completePhotoRequestRequestSchema } from "@rent-a-car/api";
 
 export const runtime = "nodejs";
-
-const REQUIRED_ANGLES: PhotoAngle[] = ["front", "back", "left", "right"];
 
 export async function GET(
   _request: Request,
@@ -38,32 +36,16 @@ export async function POST(
   request: Request,
   { params }: { params: { token: string } }
 ) {
-  const formData = await request.formData();
-
-  const photos: {
-    angle: PhotoAngle;
-    file: { buffer: Buffer; contentType: string; filename: string };
-    damageDescription?: string;
-  }[] = [];
-
-  for (const angle of REQUIRED_ANGLES) {
-    const file = formData.get(`photo_${angle}`);
-    if (!(file instanceof File)) {
-      return NextResponse.json({ error: "missing_photo", angle }, { status: 400 });
-    }
-    const damage = formData.get(`damage_${angle}`);
-    photos.push({
-      angle,
-      file: {
-        buffer: Buffer.from(await file.arrayBuffer()),
-        contentType: file.type || "image/jpeg",
-        filename: file.name,
-      },
-      damageDescription: typeof damage === "string" && damage.trim() ? damage.trim() : undefined,
-    });
+  // Malen JSON umjesto multipart-a - slike su već uploadane izravno u
+  // Hetzner s klijenta (vidi /api/photo-requests/[token]/upload-url i
+  // bugove #37/#38 u PROGRESS.md).
+  const json = await request.json().catch(() => null);
+  const parsed = completePhotoRequestRequestSchema.safeParse(json);
+  if (!parsed.success) {
+    return NextResponse.json({ error: "invalid_request" }, { status: 400 });
   }
 
-  const result = await completePhotoRequest(params.token, { photos });
+  const result = await completePhotoRequest(params.token, { photos: parsed.data.photos });
 
   if (!result.ok) {
     return NextResponse.json({ error: result.error }, { status: 400 });

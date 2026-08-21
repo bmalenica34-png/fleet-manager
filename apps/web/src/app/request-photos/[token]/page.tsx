@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useParams } from "next/navigation";
 import type { PhotoAngle } from "@rent-a-car/api";
+import { compressImageFile } from "@/lib/compressImage";
 
 const REQUIRED_ANGLES: PhotoAngle[] = ["front", "back", "left", "right"];
 const ANGLE_LABELS: Record<PhotoAngle, string> = {
@@ -25,7 +26,21 @@ interface AngleSlot {
   file: File | null;
   previewUrl: string | null;
   damageDescription: string;
+  // Ključ već uploadanog fajla u Hetzneru (presigned PUT, izravno s
+  // klijenta - isti obrazac kao signing wizard, vidi bugove #37/#38 u
+  // PROGRESS.md). null dok upload nije završio.
+  key: string | null;
+  uploading: boolean;
+  uploadError: string | null;
 }
+
+const EMPTY_ANGLE_SLOT: Omit<AngleSlot, "damageDescription"> = {
+  file: null,
+  previewUrl: null,
+  key: null,
+  uploading: false,
+  uploadError: null,
+};
 
 export default function RequestPhotosPage() {
   const params = useParams<{ token: string }>();
@@ -36,14 +51,14 @@ export default function RequestPhotosPage() {
   const [summary, setSummary] = useState<PhotoRequestSummary | null>(null);
 
   const [angles, setAngles] = useState<Record<PhotoAngle, AngleSlot>>({
-    front: { file: null, previewUrl: null, damageDescription: "" },
-    back: { file: null, previewUrl: null, damageDescription: "" },
-    left: { file: null, previewUrl: null, damageDescription: "" },
-    right: { file: null, previewUrl: null, damageDescription: "" },
-    interior_dashboard: { file: null, previewUrl: null, damageDescription: "" },
-    interior_seats: { file: null, previewUrl: null, damageDescription: "" },
-    odometer: { file: null, previewUrl: null, damageDescription: "" },
-    other: { file: null, previewUrl: null, damageDescription: "" },
+    front: { ...EMPTY_ANGLE_SLOT, damageDescription: "" },
+    back: { ...EMPTY_ANGLE_SLOT, damageDescription: "" },
+    left: { ...EMPTY_ANGLE_SLOT, damageDescription: "" },
+    right: { ...EMPTY_ANGLE_SLOT, damageDescription: "" },
+    interior_dashboard: { ...EMPTY_ANGLE_SLOT, damageDescription: "" },
+    interior_seats: { ...EMPTY_ANGLE_SLOT, damageDescription: "" },
+    odometer: { ...EMPTY_ANGLE_SLOT, damageDescription: "" },
+    other: { ...EMPTY_ANGLE_SLOT, damageDescription: "" },
   });
 
   const [submitting, setSubmitting] = useState(false);
@@ -76,7 +91,38 @@ export default function RequestPhotosPage() {
     };
   }, []);
 
-  function handleAngleFileChange(angle: PhotoAngle, file: File | null) {
+  /**
+   * Uploada fajl izravno u Hetzner preko presigned PUT URL-a, mimo Vercel
+   * funkcijskog tijela - isti obrazac kao signing wizard (vidi bugove
+   * #37/#38 u PROGRESS.md, uklj. CORS politiku na bucketu koja je već
+   * primijenjena za app origin).
+   */
+  async function uploadToStorage(file: File, angle: PhotoAngle): Promise<string> {
+    const urlRes = await fetch(`/api/photo-requests/${token}/upload-url`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        filename: file.name,
+        contentType: file.type || "image/jpeg",
+        angle,
+      }),
+    });
+    if (!urlRes.ok) throw new Error("upload_url_failed");
+    const { key, uploadUrl } = await urlRes.json();
+
+    const putRes = await fetch(uploadUrl, {
+      method: "PUT",
+      headers: { "Content-Type": file.type || "image/jpeg" },
+      body: file,
+    });
+    if (!putRes.ok) throw new Error("upload_failed");
+
+    return key as string;
+  }
+
+  async function handleAngleFileChange(angle: PhotoAngle, rawFile: File | null) {
+    const file = rawFile ? await compressImageFile(rawFile) : null;
+
     setAngles((prev) => {
       const existing = prev[angle];
       if (existing.previewUrl) {
@@ -84,35 +130,54 @@ export default function RequestPhotosPage() {
         createdUrlsRef.current.delete(existing.previewUrl);
       }
       if (!file) {
-        return { ...prev, [angle]: { file: null, previewUrl: null, damageDescription: existing.damageDescription } };
+        return { ...prev, [angle]: { ...EMPTY_ANGLE_SLOT, damageDescription: existing.damageDescription } };
       }
       const url = URL.createObjectURL(file);
       createdUrlsRef.current.add(url);
-      return { ...prev, [angle]: { file, previewUrl: url, damageDescription: existing.damageDescription } };
+      return {
+        ...prev,
+        [angle]: { file, previewUrl: url, key: null, uploading: false, uploadError: null, damageDescription: existing.damageDescription },
+      };
     });
+    if (!file) return;
+
+    setAngles((prev) => ({ ...prev, [angle]: { ...prev[angle], uploading: true, uploadError: null } }));
+    try {
+      const key = await uploadToStorage(file, angle);
+      setAngles((prev) =>
+        prev[angle].file === file ? { ...prev, [angle]: { ...prev[angle], key, uploading: false } } : prev
+      );
+    } catch {
+      setAngles((prev) =>
+        prev[angle].file === file
+          ? { ...prev, [angle]: { ...prev[angle], uploading: false, uploadError: "Upload nije uspio. Pokušaj ponovno." } }
+          : prev
+      );
+    }
   }
 
   function handleAngleDamageChange(angle: PhotoAngle, value: string) {
     setAngles((prev) => ({ ...prev, [angle]: { ...prev[angle], damageDescription: value } }));
   }
 
-  const photosComplete = REQUIRED_ANGLES.every((angle) => angles[angle].file);
+  const photosComplete = REQUIRED_ANGLES.every((angle) => angles[angle].key);
 
   async function handleSubmit() {
     if (!photosComplete) return;
     setSubmitting(true);
     setSubmitError(null);
 
-    const formData = new FormData();
-    REQUIRED_ANGLES.forEach((angle) => {
-      const slot = angles[angle];
-      if (slot.file) formData.append(`photo_${angle}`, slot.file);
-      if (slot.damageDescription.trim()) {
-        formData.append(`damage_${angle}`, slot.damageDescription.trim());
-      }
-    });
+    const photos = REQUIRED_ANGLES.map((angle) => ({
+      angle,
+      key: angles[angle].key as string,
+      damageDescription: angles[angle].damageDescription.trim() || undefined,
+    }));
 
-    const res = await fetch(`/api/photo-requests/${token}`, { method: "POST", body: formData });
+    const res = await fetch(`/api/photo-requests/${token}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ photos }),
+    });
     setSubmitting(false);
 
     if (!res.ok) {
@@ -170,7 +235,7 @@ export default function RequestPhotosPage() {
           {REQUIRED_ANGLES.map((angle) => {
             const slot = angles[angle];
             return (
-              <div key={angle} className={`angle-slot${slot.file ? " done" : ""}`}>
+              <div key={angle} className={`angle-slot${slot.key ? " done" : ""}`}>
                 {slot.previewUrl ? <img src={slot.previewUrl} alt={ANGLE_LABELS[angle]} /> : null}
                 <div>{ANGLE_LABELS[angle]}</div>
                 <input
@@ -179,6 +244,8 @@ export default function RequestPhotosPage() {
                   capture="environment"
                   onChange={(e) => handleAngleFileChange(angle, e.target.files?.[0] ?? null)}
                 />
+                {slot.uploading && <p className="muted">Uploadam...</p>}
+                {slot.uploadError && <p className="error">{slot.uploadError}</p>}
                 <textarea
                   placeholder="Opis oštećenja (opcionalno)"
                   value={slot.damageDescription}

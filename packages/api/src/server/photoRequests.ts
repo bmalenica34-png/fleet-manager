@@ -2,7 +2,7 @@ import type { Client, Contract, PhotoRequest, Vehicle } from "@prisma/client";
 import { prisma } from "../db/client";
 import { generateSigningToken, verifySigningToken } from "../lib/signing-token";
 import { sendPhotoRequestEmail, sendPhotoRequestFulfilledEmail } from "../lib/email";
-import { buildObjectKey, uploadObject } from "../storage/hetzner";
+import { buildObjectKey, getPresignedUploadUrl } from "../storage/hetzner";
 import { requiredHandoverAngles, type PhotoAngle } from "../schemas/handoverPhoto";
 
 function getPhotoRequestBaseUrl(): string {
@@ -93,14 +93,37 @@ export async function resolvePhotoRequest(token: string): Promise<PhotoRequestRe
   return { status: "ok", photoRequest };
 }
 
-interface UploadedFile {
-  buffer: Buffer;
-  contentType: string;
-  filename: string;
+export type CreatePhotoRequestUploadUrlResult =
+  | { ok: true; key: string; uploadUrl: string }
+  | { ok: false; error: "invalid" | "expired" | "already_fulfilled" };
+
+/**
+ * Izdaje presigned PUT URL za jednu sliku - klijent uploada bytes izravno
+ * u Hetzner, mimo Vercel funkcijskog tijela (isti obrazac kao signing
+ * wizard, vidi bugove #37/#38 u PROGRESS.md). Token se provjerava
+ * identično resolvePhotoRequest-u.
+ */
+export async function createPhotoRequestUploadUrl(
+  token: string,
+  filename: string,
+  contentType: string,
+  angle: PhotoAngle
+): Promise<CreatePhotoRequestUploadUrlResult> {
+  const resolution = await resolvePhotoRequest(token);
+  if (resolution.status !== "ok") {
+    return { ok: false, error: resolution.status };
+  }
+  const { photoRequest } = resolution;
+  const key = buildObjectKey(
+    `contracts/${photoRequest.contract.id}/photo-requests/${photoRequest.id}/${angle}`,
+    filename
+  );
+  const uploadUrl = await getPresignedUploadUrl(key, contentType);
+  return { ok: true, key, uploadUrl };
 }
 
 export interface CompletePhotoRequestInput {
-  photos: { angle: PhotoAngle; file: UploadedFile; damageDescription?: string }[];
+  photos: { angle: PhotoAngle; key: string; damageDescription?: string }[];
 }
 
 export type CompletePhotoRequestResult =
@@ -130,20 +153,12 @@ export async function completePhotoRequest(
     return { ok: false, error: "missing_angles" };
   }
 
-  const photoUploads = await Promise.all(
-    input.photos.map(async (photo) => {
-      const key = buildObjectKey(
-        `contracts/${contract.id}/photo-requests/${photoRequest.id}/${photo.angle}`,
-        photo.file.filename
-      );
-      await uploadObject({ key, body: photo.file.buffer, contentType: photo.file.contentType });
-      return { angle: photo.angle, key, damageDescription: photo.damageDescription };
-    })
-  );
-
+  // Slike su već uploadane izravno u Hetzner s klijenta (presigned PUT,
+  // vidi createPhotoRequestUploadUrl) - ovdje samo spremamo već dobivene
+  // ključeve u bazu, nema više servera-side uploada.
   await prisma.$transaction([
     prisma.handoverPhoto.createMany({
-      data: photoUploads.map((p) => ({
+      data: input.photos.map((p) => ({
         contractId: contract.id,
         photoRequestId: photoRequest.id,
         angle: p.angle,
