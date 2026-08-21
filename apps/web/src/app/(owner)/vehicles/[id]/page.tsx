@@ -53,6 +53,16 @@ export default function VehicleDetailPage() {
   const [model, setModel] = useState("");
   const [customModel, setCustomModel] = useState("");
   const [year, setYear] = useState("");
+  const [licensePlate, setLicensePlate] = useState("");
+  const [vin, setVin] = useState("");
+
+  // OCR prefill iz prometne - koristi već odabrani `docFile` (isti file
+  // input kao za upload), samo šalje na ekstrakciju umjesto na spremanje.
+  // Vlasnik i dalje mora kliknuti "Spremi promjene" na "Podaci o vozilu"
+  // kartici da prihvati prefilana polja.
+  const [ocrLoading, setOcrLoading] = useState(false);
+  const [ocrError, setOcrError] = useState<string | null>(null);
+  const [ocrNotice, setOcrNotice] = useState<string | null>(null);
 
   // Prometna: file se drži u state-u i prikazuje kao preview dok korisnik
   // ne klikne "Spremi prometnu" - upload se ne šalje odmah na odabir.
@@ -121,6 +131,8 @@ export default function VehicleDetailPage() {
       setCustomModel(vehicle.model);
     }
     setYear(vehicle.year ? String(vehicle.year) : "");
+    setLicensePlate(vehicle.licensePlate);
+    setVin(vehicle.vin ?? "");
   }, [vehicle]);
 
   const isCustomMake = make === OTHER_VEHICLE_OPTION;
@@ -186,8 +198,8 @@ export default function VehicleDetailPage() {
       make: resolvedMake,
       model: resolvedModel,
       year: year ? Number(year) : undefined,
-      licensePlate: formData.get("licensePlate"),
-      vin: formData.get("vin") || undefined,
+      licensePlate,
+      vin: vin || undefined,
       registrationExpiresAt: registrationExpiresAt || undefined,
     };
 
@@ -317,6 +329,67 @@ export default function VehicleDetailPage() {
     load();
   }
 
+  async function handleOcrScan() {
+    if (!docFile) return;
+    setOcrLoading(true);
+    setOcrError(null);
+    setOcrNotice(null);
+
+    const formData = new FormData();
+    formData.append("file", docFile);
+    const res = await fetch("/api/ocr/registration-doc", { method: "POST", body: formData });
+
+    setOcrLoading(false);
+    if (!res.ok) {
+      const body = await res.json().catch(() => null);
+      setOcrError(
+        body?.error === "pdf_not_supported"
+          ? "OCR trenutno podržava samo slike (fotografiraj prometnu umjesto PDF-a)."
+          : "Skeniranje nije uspjelo. Podatke možeš upisati ručno na kartici 'Podaci o vozilu'."
+      );
+      return;
+    }
+
+    const result = await res.json();
+    const foundFields: string[] = [];
+
+    if (result.make) {
+      if (VEHICLE_MAKES.includes(result.make)) {
+        setMake(result.make);
+        setModel("");
+        setCustomModel("");
+      } else {
+        setMake(OTHER_VEHICLE_OPTION);
+        setCustomMake(result.make);
+      }
+      foundFields.push("marka");
+    }
+    if (result.model) {
+      const models = VEHICLE_MODELS_BY_MAKE[result.make ?? make] ?? [];
+      if (models.includes(result.model)) {
+        setModel(result.model);
+      } else {
+        setModel(OTHER_VEHICLE_OPTION);
+        setCustomModel(result.model);
+      }
+      foundFields.push("model");
+    }
+    if (result.licensePlate) {
+      setLicensePlate(result.licensePlate);
+      foundFields.push("tablice");
+    }
+    if (result.vin) {
+      setVin(result.vin);
+      foundFields.push("VIN");
+    }
+
+    setOcrNotice(
+      foundFields.length > 0
+        ? `Prepoznato: ${foundFields.join(", ")}. Provjeri na kartici "Podaci o vozilu" i spremi.`
+        : "Nije prepoznato nijedno polje - upiši ručno."
+    );
+  }
+
   if (loading) return <p className="muted">Učitavanje...</p>;
   if (!vehicle) return <p className="error">Vozilo nije pronađeno.</p>;
 
@@ -394,11 +467,11 @@ export default function VehicleDetailPage() {
         </label>
         <label>
           Registarske tablice
-          <input name="licensePlate" defaultValue={vehicle.licensePlate} required />
+          <input name="licensePlate" value={licensePlate} onChange={(e) => setLicensePlate(e.target.value)} required />
         </label>
         <label>
           VIN
-          <input name="vin" defaultValue={vehicle.vin ?? ""} />
+          <input name="vin" value={vin} onChange={(e) => setVin(e.target.value)} />
         </label>
         <label>
           Datum isteka registracije
@@ -446,11 +519,18 @@ export default function VehicleDetailPage() {
 
       <input type="file" accept="image/*,.pdf" onChange={handleDocSelected} disabled={uploadingDoc} />
       {docFile && (
-        <button className="btn btn-primary" onClick={handleSaveDoc} disabled={uploadingDoc} style={{ marginLeft: "0.5rem" }}>
-          {uploadingDoc ? "Spremanje..." : "Spremi prometnu"}
-        </button>
+        <>
+          <button className="btn btn-primary" onClick={handleSaveDoc} disabled={uploadingDoc} style={{ marginLeft: "0.5rem" }}>
+            {uploadingDoc ? "Spremanje..." : "Spremi prometnu"}
+          </button>
+          <button className="btn" onClick={handleOcrScan} disabled={ocrLoading} style={{ marginLeft: "0.5rem" }}>
+            {ocrLoading ? "Skeniranje..." : "Skeniraj (OCR)"}
+          </button>
+        </>
       )}
       {docError && <p className="error">{docError}</p>}
+      {ocrError && <p className="error">{ocrError}</p>}
+      {ocrNotice && <p className="muted">{ocrNotice}</p>}
 
       <h2 style={{ marginTop: "2rem" }}>Polica osiguranja</h2>
       {vehicle.insurancePolicyUrl && !insurancePreviewUrl && (

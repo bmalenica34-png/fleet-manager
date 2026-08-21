@@ -4,13 +4,37 @@ Dinamički log stanja projekta. Ažurira se na kraju svake sesije. Za statičnu
 arhitekturu/konvencije vidi [CLAUDE.md](CLAUDE.md) — ovaj dokument je "što je
 gotovo i zašto", ne "kako treba izgledati".
 
-**Zadnje ažurirano:** 2026-08-21, peti nastavak - preventivno primijenjen
-isti direct-to-storage + CORS fix (bugovi #37/#38) na
-`/request-photos/[token]` (bug #39), prije nego je taj flow stvarno pukao
-na produkciji. Ovaj put testirano PRAVIM browserom od početka (Claude
-Browser Pane, ne Node/curl) - lekcija iz buga #38 primijenjena unaprijed.
-Čisto web promjena, `apps/mobile` nedirano. Sljedeći korak: Tier 2 backlog
-(OCR ekstrakcija + generator punomoći).
+**Zadnje ažurirano:** 2026-08-21, šesti nastavak - započet Tier 2 backlog.
+Prva stavka gotova: **OCR ekstrakcija podataka s prometne dozvole** (Google
+Cloud Vision REST API, `GOOGLE_VISION_API_KEY` već postojao u `.env`).
+Novi `packages/api/src/ocr/` modul (`vision.ts` - goli `fetch` na
+`images:annotate` s `DOCUMENT_TEXT_DETECTION`, bez `@google-cloud/vision`
+SDK-a jer taj očekuje service-account JSON, ne API key;
+`extractRegistrationDoc.ts` - regex ekstrakcija marke/modela/tablica/VIN-a
+iz OCR teksta, prvo pokušava harmonizirane EU šifre polja prometne dozvole
+D.1/D.3/A/E, fallback na generičke regexe za hrvatsku tablicu i VIN format
+ako šifre nisu prepoznate). Nova ruta `POST /api/ocr/registration-doc`
+(auth-zaštićena, standalone - ne zahtijeva postojeći `vehicleId` jer radi i
+na "Novo vozilo" formi prije nego vozilo uopće postoji), NE sprema ništa,
+samo vraća prijedlog polja. UI: gumb "Skeniraj prometnu (OCR)" na
+`/vehicles/new` i "Skeniraj (OCR)" na `/vehicles/[id]` dokumenti tabu (kraj
+postojećeg uploada prometne) - prefila marka/model/tablice/VIN state,
+korisnik uvijek pregleda i ručno klikne "Spremi" (ništa se ne sprema
+automatski iz OCR-a). **NAMJERNO ne vadi datum isteka registracije** -
+korisnikova eksplicitna napomena da je taj datum na prometnoj često
+prekriven pečatom, pouzdaniji izvor je polica osiguranja (sljedeća Tier 2
+stavka, PDF text-parsing, još nije rađena). Verifikacija: `tsc --noEmit`
+čist na `packages/api` i `apps/web`, `next build` čist (nova ruta
+`/api/ocr/registration-doc` vidljiva u build outputu), `curl` bez sesije
+potvrđuje 401 (auth gate radi), regex ekstrakcija sanity-testirana protiv
+sintetičkog OCR teksta u oba formata (šifra+vrijednost isti red, šifra pa
+vrijednost sljedeći red) - **NIJE testirano protiv stvarnog Google Vision
+API poziva ni stvarne slike prometne** (nema test slike, a pravi owner
+login kroz Browser Pane je prije eksplicitno ocijenjen preskupim za ovaj
+tip promjene - vidi dopunu 2026-08-19 niže). Prva prava upotreba na
+stvarnoj prometnoj otkrit će treba li regex fino podesiti. Preostaje u
+Tier 2: PDF text-parsing police osiguranja (datum isteka registracije),
+opcionalni OCR za osobnu/vozačku, generator punomoći za registraciju.
 
 **Prijašnji dio iste sesije (četvrti nastavak):** bug #37 fix (direct-
 to-storage upload) je i dalje pucao na pravom uređaju, sad kod PUT koraka.
@@ -1918,8 +1942,9 @@ verifikacija. Ne pokušavati ponovno bez izričitog dogovora.
 
 ## 7. Backlog budućih razvojnih faza (po prioritetu)
 
-Cijeli popis dao korisnik 2026-08-19. Tier 1 gotov ovom sesijom (vidi modul
-2 sekciju za implementacijske detalje). Tier 2-5 NISU dirani - čist
+Cijeli popis dao korisnik 2026-08-19. Tier 1 gotov (vidi modul 2 sekciju za
+implementacijske detalje). Tier 2 započet 2026-08-21 (OCR prometne gotova,
+vidi dnevnik na vrhu dokumenta i sekciju ispod). Tier 3-5 NISU dirani - čist
 kontekst za buduće sesije, ne počinjati bez eksplicitnog dogovora.
 
 **Tier 1 — UX brzina unosa** ✅ gotovo (ova sesija)
@@ -1928,16 +1953,18 @@ kontekst za buduće sesije, ne počinjati bez eksplicitnog dogovora.
 3. Trajanje najma kao broj dana → auto-izračun datuma povrata
 4. (dopuna) Svi prikazani datumi u `DD.MM.GGGG.` formatu, web i mobile
 
-**Tier 2 — Dokument-generacija i ekstrakcija** (nije dirano)
-- OCR ekstrakcija podataka s prometne i police osiguranja (marka, model,
-  VIN, registracija) - datum isteka registracije vaditi iz police (PDF,
+**Tier 2 — Dokument-generacija i ekstrakcija** (u tijeku, vidi dnevnik gore)
+- ✅ OCR ekstrakcija marke/modela/tablica/VIN-a s prometne (Google Vision) -
+  gotovo, kodno verificirano, čeka prvi test na stvarnoj prometnoj
+- ⏳ Datum isteka registracije vaditi iz police osiguranja (PDF,
   tekst-parsing), NE s prometne (pečat prekriva datum na fizičkom
-  dokumentu - korisnikova eksplicitna napomena, važno za implementaciju)
-- Opcionalno: OCR ekstrakcija osobne/vozačke za prefil client podataka u
-  ugovoru
-- Generator punomoći za registraciju vozila (PDF, fiksni predložak: podaci
+  dokumentu - korisnikova eksplicitna napomena, važno za implementaciju) -
+  nije rađeno
+- ⏳ Opcionalno: OCR ekstrakcija osobne/vozačke za prefil client podataka u
+  ugovoru - nije rađeno
+- ⏳ Generator punomoći za registraciju vozila (PDF, fiksni predložak: podaci
   tvrtke + vozila + zaposlenika, print-ready) - vozila su vlasništvo
-  tvrtke, zaposlenici idu registrirati
+  tvrtke, zaposlenici idu registrirati - nije rađeno
 
 **Tier 3 — Status vozila i pregled flote** (nije dirano)
 - Status vozila: pod ugovorom / slobodno / na servisu

@@ -17,6 +17,17 @@ export default function NewVehiclePage() {
   const [model, setModel] = useState("");
   const [customModel, setCustomModel] = useState("");
   const [year, setYear] = useState("");
+  const [licensePlate, setLicensePlate] = useState("");
+  const [vin, setVin] = useState("");
+
+  // OCR prefill - skenira prometnu PRIJE spremanja vozila (vozilo još ne
+  // postoji, pa se prometna ovdje ne uploada na Hetzner, samo šalje na
+  // ekstrakciju). Vlasnik i dalje mora sam kliknuti "Spremi vozilo" i može
+  // ispraviti bilo koje pogrešno prepoznato polje prije toga.
+  const [ocrFile, setOcrFile] = useState<File | null>(null);
+  const [ocrLoading, setOcrLoading] = useState(false);
+  const [ocrError, setOcrError] = useState<string | null>(null);
+  const [ocrNotice, setOcrNotice] = useState<string | null>(null);
 
   const isCustomMake = make === OTHER_VEHICLE_OPTION;
   const isCustomModel = isCustomMake || model === OTHER_VEHICLE_OPTION;
@@ -50,8 +61,8 @@ export default function NewVehiclePage() {
       make: resolvedMake,
       model: resolvedModel,
       year: year ? Number(year) : undefined,
-      licensePlate: formData.get("licensePlate"),
-      vin: formData.get("vin") || undefined,
+      licensePlate,
+      vin: vin || undefined,
       registrationExpiresAt: registrationExpiresAt || undefined,
     };
 
@@ -73,9 +84,94 @@ export default function NewVehiclePage() {
     router.push(`/vehicles/${vehicle.id}`);
   }
 
+  async function handleOcrScan() {
+    if (!ocrFile) return;
+    setOcrLoading(true);
+    setOcrError(null);
+    setOcrNotice(null);
+
+    const formData = new FormData();
+    formData.append("file", ocrFile);
+    const res = await fetch("/api/ocr/registration-doc", { method: "POST", body: formData });
+
+    setOcrLoading(false);
+    if (!res.ok) {
+      const body = await res.json().catch(() => null);
+      setOcrError(
+        body?.error === "pdf_not_supported"
+          ? "OCR trenutno podržava samo slike (fotografiraj prometnu umjesto PDF-a)."
+          : "Skeniranje nije uspjelo. Podatke možeš upisati ručno."
+      );
+      return;
+    }
+
+    const result = await res.json();
+    const foundFields: string[] = [];
+
+    if (result.make) {
+      if (VEHICLE_MAKES.includes(result.make)) {
+        setMake(result.make);
+        setModel("");
+        setCustomModel("");
+      } else {
+        setMake(OTHER_VEHICLE_OPTION);
+        setCustomMake(result.make);
+      }
+      foundFields.push("marka");
+    }
+    if (result.model) {
+      const models = VEHICLE_MODELS_BY_MAKE[result.make ?? make] ?? [];
+      if (models.includes(result.model)) {
+        setModel(result.model);
+      } else {
+        setModel(OTHER_VEHICLE_OPTION);
+        setCustomModel(result.model);
+      }
+      foundFields.push("model");
+    }
+    if (result.licensePlate) {
+      setLicensePlate(result.licensePlate);
+      foundFields.push("tablice");
+    }
+    if (result.vin) {
+      setVin(result.vin);
+      foundFields.push("VIN");
+    }
+
+    setOcrNotice(
+      foundFields.length > 0
+        ? `Prepoznato: ${foundFields.join(", ")}. Provjeri polja prije spremanja.`
+        : "Nije prepoznato nijedno polje - upiši ručno."
+    );
+  }
+
   return (
     <div>
       <h1>Novo vozilo</h1>
+
+      <div style={{ marginBottom: "1.5rem", padding: "1rem", border: "1px solid var(--border, #ddd)", borderRadius: "8px" }}>
+        <label>
+          Skeniraj prometnu (OCR, opcionalno)
+          <input
+            type="file"
+            accept="image/*"
+            onChange={(e) => {
+              setOcrFile(e.target.files?.[0] ?? null);
+              setOcrError(null);
+              setOcrNotice(null);
+            }}
+            disabled={ocrLoading}
+          />
+        </label>
+        {ocrFile && (
+          <button type="button" className="btn" onClick={handleOcrScan} disabled={ocrLoading} style={{ marginTop: "0.5rem" }}>
+            {ocrLoading ? "Skeniranje..." : "Skeniraj i prefilaj polja"}
+          </button>
+        )}
+        {ocrError && <p className="error">{ocrError}</p>}
+        {ocrNotice && <p className="muted">{ocrNotice}</p>}
+      </div>
+
       <form onSubmit={handleSubmit}>
         <label>
           Marka
@@ -130,11 +226,11 @@ export default function NewVehiclePage() {
         </label>
         <label>
           Registarske tablice
-          <input name="licensePlate" required />
+          <input name="licensePlate" value={licensePlate} onChange={(e) => setLicensePlate(e.target.value)} required />
         </label>
         <label>
           VIN
-          <input name="vin" />
+          <input name="vin" value={vin} onChange={(e) => setVin(e.target.value)} />
         </label>
         <label>
           Datum isteka registracije

@@ -12,6 +12,7 @@ export * from "./cron";
 export * from "./auth";
 export * from "./registrationReminders";
 export * from "./photoRequests";
+export * from "../ocr/extractRegistrationDoc";
 export * from "../storage/hetzner";
 export * from "../lib/email";
 export * from "../lib/signing-token";

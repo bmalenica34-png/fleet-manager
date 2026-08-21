@@ -5,6 +5,7 @@ export * from "./schemas/handoverPhoto";
 export * from "./schemas/annex";
 export * from "./schemas/photoRequest";
 export * from "./schemas/signing";
+export * from "./schemas/ocr";
 export * from "./lib/dateFormat";
 export * from "./data/vehicleCatalog";
 
