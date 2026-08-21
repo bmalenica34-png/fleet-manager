@@ -13,12 +13,17 @@ export async function POST(request: Request) {
 
   const supabase = createClient();
 
+  // Vidi identičan komentar u owner/request-link/route.ts - fallback mora
+  // pratiti stvarni request origin (Vercel multi-alias + Host-only PKCE
+  // cookie), ne fiksnu env varijablu.
+  const requestOrigin = new URL(request.url).origin;
+
   const { error } = await supabase.auth.signInWithOtp({
     email,
     options: {
       emailRedirectTo: resolveEmailRedirectTo(
         body.redirectTo,
-        `${process.env.NEXT_PUBLIC_OWNER_APP_URL}/api/auth/callback`
+        `${requestOrigin}/api/auth/callback`
       ),
     },
   });

@@ -4,7 +4,16 @@ Dinamički log stanja projekta. Ažurira se na kraju svake sesije. Za statičnu
 arhitekturu/konvencije vidi [CLAUDE.md](CLAUDE.md) — ovaj dokument je "što je
 gotovo i zašto", ne "kako treba izgledati".
 
-**Zadnje ažurirano:** 2026-08-21, šesti nastavak - započet Tier 2 backlog.
+**Zadnje ažurirano:** 2026-08-21, sedmi nastavak - bug #40 (owner web login
+loop) dijagnosticiran i popravljen, vidi bug #40 niže za pun dokazni lanac
+(Vercel logs, deploy provjera, Supabase allowlist test, izravno cookie
+mjerenje kroz Browser Pane). Uzrok: dvije žive produkcijske domene
+(`-ten`/`-branimir-s-projects1` aliasi) + fiksna redirect env varijabla =
+Host-only PKCE cookie nevidljiv na drugoj domeni. Fix: redirect fallback
+sad prati stvarni request origin. Nije još commitano/pushano - čeka
+korisnikovu potvrdu.
+
+**Prijašnji dio iste sesije (šesti nastavak) - započet Tier 2 backlog.
 Prva stavka gotova: **OCR ekstrakcija podataka s prometne dozvole** (Google
 Cloud Vision REST API, `GOOGLE_VISION_API_KEY` već postojao u `.env`).
 Novi `packages/api/src/ocr/` modul (`vision.ts` - goli `fetch` na
@@ -1595,6 +1604,99 @@ tražio da se zapamte jer bi se mogli ponoviti.
     uspješan (nova `/api/photo-requests/[token]/upload-url` ruta vidljiva
     u outputu). **Isključivo web promjena** (`apps/web`, `packages/api`) -
     `apps/mobile` nije dirano, nije potreban novi EAS build.
+
+40. ⚠️ **Owner web login (`/login`) padao nakon klika na magic link -
+    korisnik vraćen na `/login` s praznom formom, BEZ ikakve vidljive
+    greške.** Korisnik eksplicitno tražio dokaz prije fixa (Vercel Function
+    Logs, deploy-regresija provjera, Supabase redirect allowlist, stvarno
+    cookie ponašanje) - sva četiri provjerena izravno, ne pretpostavkom:
+
+    1. **Vercel Function Logs** (`vercel logs`, CLI je već bio ulogiran
+       preko postojećeg `xdg.data/com.vercel.cli/auth.json` - nije trebalo
+       novi login) potvrdili su da je `/api/auth/callback` STVARNO pozvan
+       (dvaput, 2026-08-21 11:54:50 i 11:55:50), oba puta odmah praćena s
+       `GET /login` - ruta se izvršava i redirecta natrag, nije da se
+       uopće ne pokreće. Log je otkrio ključan detalj: `POST
+       /api/auth/owner/request-link` (11:54:33) izvršen je na hostu
+       `fleet-manager-web-ten.vercel.app`, dok su OBA `/api/auth/callback`
+       poziva izvršena na DRUGOM hostu,
+       `fleet-manager-web-branimir-s-projects1.vercel.app` - dvije različite
+       domene za isti login pokušaj.
+    2. **Deploy-regresija provjerena** (`vercel ls fleet-manager-web`) -
+       nije regresija od deploy-a, oba aliasa (`-ten` i
+       `-branimir-s-projects1`) postoje i pokazuju na isti, aktualan
+       deployment već 5+ dana (od otprilike 16.08., vidi bug #38 kontekst
+       gdje je `-ten` prvi put korišten za browser-based CORS test) -
+       problem je latentan otkad postoje DVIJE žive produkcijske domene, ne
+       nešto uvedeno ovom ili prijašnjom sesijom.
+    3. **Supabase Authentication → URL Configuration allowlist provjerena
+       IZRAVNIM pozivom** (scratch skripta, `supabase.auth.signInWithOtp`
+       s eksplicitnim `emailRedirectTo` za tri različite domene, uklj. NIKAD
+       prije viđenu nasumičnu `*.vercel.app` domenu) - **SVE tri su
+       prihvaćene** (`OK`, ne "invalid redirect URL"), što dokazuje da je
+       Supabase strana konfigurirana s permisivnim `*.vercel.app` wildcard
+       pravilom, NE uskom listom - allowlist nikad nije bio uzrok i nije
+       trebao nikakvu izmjenu. (Usput zabilježeno kao manji, odvojen nalaz:
+       taj wildcard je širi nego što treba - dozvoljava emailRedirectTo na
+       BILO KOJU `*.vercel.app` domenu, ne samo projektu vlastite aliase -
+       nije popravljeno ovom sesijom, nije uzrok ovog buga.)
+    4. **Cookie ponašanje potvrđeno izravno kroz Browser Pane, ne
+       pretpostavkom** - pravi submit owner login forme na
+       `fleet-manager-web-ten.vercel.app` (stvaran magic-link mail poslan
+       na `b.malenica34@gmail.com`) pokazao je `document.cookie` odmah
+       nakon submita: **`sb-...-auth-token-code-verifier` i srodni PKCE
+       cookiji SU postavljeni, ali kao Host-only** (nema `Domain` atributa,
+       očekivano - `@supabase/ssr` default). Navigacija na
+       `fleet-manager-web-branimir-s-projects1.vercel.app` odmah zatim
+       pokazala je `document.cookie` **prazan string** - cookie stvarno NIJE
+       vidljiv na drugoj domeni, potvrđeno mjerenjem, ne teorijom.
+
+    **Pravi uzrok:** `apps/web/src/app/api/auth/{owner,client}/
+    request-link/route.ts` su fallback `emailRedirectTo` (kad web poziv ne
+    šalje mobile `redirectTo`) gradili od **fiksne env varijable**
+    (`` `${process.env.NEXT_PUBLIC_OWNER_APP_URL}/api/auth/callback` ``) -
+    JEDNA, uvijek ista domena, bez obzira s koje je od dvije važeće
+    produkcijske domene korisnik zapravo poslao zahtjev. PKCE
+    `code_verifier` cookie je Host-only (vezan na domenu koja ga je
+    postavila), pa čim korisnik zatraži link s BILO KOJE domene različite
+    od `NEXT_PUBLIC_OWNER_APP_URL` vrijednosti, magic link ga uvijek vodi
+    na `/api/auth/callback` na TU fiksnu domenu, gdje `exchangeCodeForSession`
+    tiho puca (cookie nedostupan) → `/api/auth/callback/route.ts` (već
+    postojeći kod) redirecta na `/login?error=invalid_link` → **`/login`
+    stranica nikad nije čitala `error` query param**, pa korisnik vidi samo
+    praznu formu, bez ikakvog traga da je bilo što pokušano.
+
+    **Fix, dva dijela:**
+    1. `owner/request-link` i `client/request-link` rute: fallback sad
+       gradi `emailRedirectTo` od **stvarnog origina zahtjeva**
+       (`new URL(request.url).origin`), ne fiksne env varijable - isti
+       obrazac koji `/api/auth/callback/route.ts` već koristi za svoje
+       redirecte (`url.origin`). Sigurno bez dodatne allowlist provjere jer
+       Vercel routing sam po sebi ograničava koje domene uopće mogu
+       stvarno posluživati taj request (ne postoji način da klijent
+       "izmisli" origin izvan stvarno dodijeljenih aliasa/domena
+       deploymenta). `NEXT_PUBLIC_OWNER_APP_URL` ostaje netaknuta env
+       varijabla - i dalje default za lokalni dev (`localhost:3000`) i za
+       mobile (`resolveEmailRedirectTo` i dalje prvo provjerava
+       `MOBILE_APP_SCHEME`, taj dio flowa nepromijenjen).
+    2. `/login` i `/portal/login`: dodan `useEffect` koji čita
+       `window.location.search` na mount i prikazuje jasnu poruku ako je
+       `?error=invalid_link` prisutan ("Link za prijavu je istekao ili je
+       već iskorišten. Zatraži novi.") - obrana u dubinu, pokriva i
+       legitimne slučajeve (istekao/dvaput kliknut link) koji nisu ovaj
+       specifični uzrok, ali su prije bili jednako nevidljivi. Namjerno
+       `window.location.search` umjesto `useSearchParams()` - potonji bi
+       zahtijevao Suspense boundary da `/login`/`/portal/login` ostanu
+       statički prerenderani (`○` u build outputu), a client-only efekt na
+       mount je dovoljan za ovaj slučaj.
+
+    **Verifikacija:** `tsc --noEmit` čist, `next build` čist (`/login` i
+    `/portal/login` ostali `○ Static`). **Nije verificirano stvarnim
+    magic-link klikom nakon deploya** (isti razlog kao ranije PKCE
+    ograničenje - klik mora biti u browseru koji je zahtjev poslao, Claude
+    Browser Pane ne može čitati pravi email inbox) - preporučen stvaran
+    test od korisnika nakon deploya: zatraži link s `-ten` domene, klikni
+    ga, potvrdi da landa na `/vehicles`.
 
 ---
 

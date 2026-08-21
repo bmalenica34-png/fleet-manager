@@ -25,12 +25,23 @@ export async function POST(request: Request) {
   // defaulta na implicit flow, što bi bilo neusklađeno s callbackom.
   const supabase = createClient();
 
+  // Fallback (web, bez mobile redirectTo) MORA biti isto porijeklo (origin)
+  // s kojeg je ovaj zahtjev stigao, ne fiksna env varijabla - Vercel
+  // aliasira više domena na isti deployment (npr. *-ten.vercel.app i
+  // *-branimir-s-projects1.vercel.app), a PKCE code_verifier cookie je
+  // Host-only (vezan striktno na domenu koja ga je postavila). Fiksni
+  // fallback bi značio da magic link uvijek vodi na JEDNU domenu, pa bi
+  // exchangeCodeForSession tiho pucao (cookie nedostupan) čim korisnik
+  // zatraži link s BILO KOJE druge važeće domene - potvrđeno kao stvaran
+  // uzrok bug #40 (owner login), vidi PROGRESS.md.
+  const requestOrigin = new URL(request.url).origin;
+
   const { error } = await supabase.auth.signInWithOtp({
     email,
     options: {
       emailRedirectTo: resolveEmailRedirectTo(
         body.redirectTo,
-        `${process.env.NEXT_PUBLIC_OWNER_APP_URL}/api/auth/callback`
+        `${requestOrigin}/api/auth/callback`
       ),
     },
   });
