@@ -21,13 +21,21 @@ export default function NewVehiclePage() {
   const [vin, setVin] = useState("");
 
   // OCR prefill - skenira prometnu PRIJE spremanja vozila (vozilo još ne
-  // postoji, pa se prometna ovdje ne uploada na Hetzner, samo šalje na
+  // postoji, pa se ovdje ništa ne uploada na Hetzner, samo šalje na
   // ekstrakciju). Vlasnik i dalje mora sam kliknuti "Spremi vozilo" i može
-  // ispraviti bilo koje pogrešno prepoznato polje prije toga.
-  const [ocrFile, setOcrFile] = useState<File | null>(null);
-  const [ocrLoading, setOcrLoading] = useState(false);
-  const [ocrError, setOcrError] = useState<string | null>(null);
-  const [ocrNotice, setOcrNotice] = useState<string | null>(null);
+  // ispraviti bilo koje pogrešno prepoznato polje prije toga. Dva odvojena
+  // slota jer prometna ima dvije strane s različitim podacima - vanjska
+  // (tablice, veliko i jasno prikazane) i unutarnja (tablica s markom/
+  // modelom/VIN-om).
+  const [outerOcrFile, setOuterOcrFile] = useState<File | null>(null);
+  const [outerOcrLoading, setOuterOcrLoading] = useState(false);
+  const [outerOcrError, setOuterOcrError] = useState<string | null>(null);
+  const [outerOcrNotice, setOuterOcrNotice] = useState<string | null>(null);
+
+  const [innerOcrFile, setInnerOcrFile] = useState<File | null>(null);
+  const [innerOcrLoading, setInnerOcrLoading] = useState(false);
+  const [innerOcrError, setInnerOcrError] = useState<string | null>(null);
+  const [innerOcrNotice, setInnerOcrNotice] = useState<string | null>(null);
 
   const isCustomMake = make === OTHER_VEHICLE_OPTION;
   const isCustomModel = isCustomMake || model === OTHER_VEHICLE_OPTION;
@@ -84,20 +92,50 @@ export default function NewVehiclePage() {
     router.push(`/vehicles/${vehicle.id}`);
   }
 
-  async function handleOcrScan() {
-    if (!ocrFile) return;
-    setOcrLoading(true);
-    setOcrError(null);
-    setOcrNotice(null);
+  async function handleOuterOcrScan() {
+    if (!outerOcrFile) return;
+    setOuterOcrLoading(true);
+    setOuterOcrError(null);
+    setOuterOcrNotice(null);
 
     const formData = new FormData();
-    formData.append("file", ocrFile);
-    const res = await fetch("/api/ocr/registration-doc", { method: "POST", body: formData });
+    formData.append("file", outerOcrFile);
+    const res = await fetch("/api/ocr/registration-doc-outer", { method: "POST", body: formData });
 
-    setOcrLoading(false);
+    setOuterOcrLoading(false);
     if (!res.ok) {
       const body = await res.json().catch(() => null);
-      setOcrError(
+      setOuterOcrError(
+        body?.error === "pdf_not_supported"
+          ? "OCR trenutno podržava samo slike (fotografiraj prometnu umjesto PDF-a)."
+          : "Skeniranje nije uspjelo. Podatke možeš upisati ručno."
+      );
+      return;
+    }
+
+    const result = await res.json();
+    if (result.licensePlate) {
+      setLicensePlate(result.licensePlate);
+      setOuterOcrNotice("Prepoznato: tablice. Provjeri prije spremanja.");
+    } else {
+      setOuterOcrNotice("Tablice nisu prepoznate - upiši ručno.");
+    }
+  }
+
+  async function handleInnerOcrScan() {
+    if (!innerOcrFile) return;
+    setInnerOcrLoading(true);
+    setInnerOcrError(null);
+    setInnerOcrNotice(null);
+
+    const formData = new FormData();
+    formData.append("file", innerOcrFile);
+    const res = await fetch("/api/ocr/registration-doc-inner", { method: "POST", body: formData });
+
+    setInnerOcrLoading(false);
+    if (!res.ok) {
+      const body = await res.json().catch(() => null);
+      setInnerOcrError(
         body?.error === "pdf_not_supported"
           ? "OCR trenutno podržava samo slike (fotografiraj prometnu umjesto PDF-a)."
           : "Skeniranje nije uspjelo. Podatke možeš upisati ručno."
@@ -129,16 +167,12 @@ export default function NewVehiclePage() {
       }
       foundFields.push("model");
     }
-    if (result.licensePlate) {
-      setLicensePlate(result.licensePlate);
-      foundFields.push("tablice");
-    }
     if (result.vin) {
       setVin(result.vin);
       foundFields.push("VIN");
     }
 
-    setOcrNotice(
+    setInnerOcrNotice(
       foundFields.length > 0
         ? `Prepoznato: ${foundFields.join(", ")}. Provjeri polja prije spremanja.`
         : "Nije prepoznato nijedno polje - upiši ručno."
@@ -151,25 +185,50 @@ export default function NewVehiclePage() {
 
       <div style={{ marginBottom: "1.5rem", padding: "1rem", border: "1px solid var(--border, #ddd)", borderRadius: "8px" }}>
         <label>
-          Skeniraj prometnu (OCR, opcionalno)
+          Skeniraj vanjsku stranu prometne (OCR, opcionalno)
           <input
             type="file"
             accept="image/*"
             onChange={(e) => {
-              setOcrFile(e.target.files?.[0] ?? null);
-              setOcrError(null);
-              setOcrNotice(null);
+              setOuterOcrFile(e.target.files?.[0] ?? null);
+              setOuterOcrError(null);
+              setOuterOcrNotice(null);
             }}
-            disabled={ocrLoading}
+            disabled={outerOcrLoading}
           />
         </label>
-        {ocrFile && (
-          <button type="button" className="btn" onClick={handleOcrScan} disabled={ocrLoading} style={{ marginTop: "0.5rem" }}>
-            {ocrLoading ? "Skeniranje..." : "Skeniraj i prefilaj polja"}
+        <p className="muted" style={{ margin: "0.25rem 0" }}>→ registracija (tablice)</p>
+        {outerOcrFile && (
+          <button type="button" className="btn" onClick={handleOuterOcrScan} disabled={outerOcrLoading} style={{ marginTop: "0.5rem" }}>
+            {outerOcrLoading ? "Skeniranje..." : "Skeniraj i prefilaj"}
           </button>
         )}
-        {ocrError && <p className="error">{ocrError}</p>}
-        {ocrNotice && <p className="muted">{ocrNotice}</p>}
+        {outerOcrError && <p className="error">{outerOcrError}</p>}
+        {outerOcrNotice && <p className="muted">{outerOcrNotice}</p>}
+      </div>
+
+      <div style={{ marginBottom: "1.5rem", padding: "1rem", border: "1px solid var(--border, #ddd)", borderRadius: "8px" }}>
+        <label>
+          Skeniraj unutarnju stranu prometne (OCR, opcionalno)
+          <input
+            type="file"
+            accept="image/*"
+            onChange={(e) => {
+              setInnerOcrFile(e.target.files?.[0] ?? null);
+              setInnerOcrError(null);
+              setInnerOcrNotice(null);
+            }}
+            disabled={innerOcrLoading}
+          />
+        </label>
+        <p className="muted" style={{ margin: "0.25rem 0" }}>→ marka/model/VIN</p>
+        {innerOcrFile && (
+          <button type="button" className="btn" onClick={handleInnerOcrScan} disabled={innerOcrLoading} style={{ marginTop: "0.5rem" }}>
+            {innerOcrLoading ? "Skeniranje..." : "Skeniraj i prefilaj"}
+          </button>
+        )}
+        {innerOcrError && <p className="error">{innerOcrError}</p>}
+        {innerOcrNotice && <p className="muted">{innerOcrNotice}</p>}
       </div>
 
       <form onSubmit={handleSubmit}>

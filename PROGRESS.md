@@ -4,14 +4,78 @@ Dinamički log stanja projekta. Ažurira se na kraju svake sesije. Za statičnu
 arhitekturu/konvencije vidi [CLAUDE.md](CLAUDE.md) — ovaj dokument je "što je
 gotovo i zašto", ne "kako treba izgledati".
 
-**Zadnje ažurirano:** 2026-08-21, sedmi nastavak - bug #40 (owner web login
-loop) dijagnosticiran i popravljen, vidi bug #40 niže za pun dokazni lanac
-(Vercel logs, deploy provjera, Supabase allowlist test, izravno cookie
-mjerenje kroz Browser Pane). Uzrok: dvije žive produkcijske domene
-(`-ten`/`-branimir-s-projects1` aliasi) + fiksna redirect env varijabla =
-Host-only PKCE cookie nevidljiv na drugoj domeni. Fix: redirect fallback
-sad prati stvarni request origin. Nije još commitano/pushano - čeka
-korisnikovu potvrdu.
+**Zadnje ažurirano:** 2026-08-21, deveti nastavak - OCR na prometnoj
+dozvoli razdvojen na dva odvojena slota (vanjska/unutarnja strana) po
+korisnikovom dizajnu, plus popravljen VIN ekstrakcijski bug otkriven usput.
+Vidi arhitektonsku odluku "OCR: vanjska vs. unutarnja strana prometne"
+niže za pun opis. Ukratko:
+- **VIN fix (unutarnja strana):** stari `matchVin` je hvatao PRVI tekst
+  nakon EU šifre "E", bez validacije da li stvarno izgleda kao VIN - ako
+  dokument ima legendu koja objašnjava šifre PRIJE stvarne tablice
+  vrijednosti (npr. "E - Identifikacijski broj vozila" prije retka s pravim
+  VIN-om), `matchByCode` bi pogrešno vratio tekst legende jer je prvi
+  pogodak, i fallback `matchVin` se nikad ne bi ni pokušao (kratko-spojena
+  logika `matchByCode(...) ?? matchVin(...)`). Novi `findCodeValueWindows`
+  helper prolazi kroz SVAKU pojavu šifre "E" (ne samo prvu) i validira
+  svaki kandidat protiv strogog VIN regexa (17 znakova, bez I/O/Q) prije
+  prihvaćanja - legenda se sad preskače jer njen tekst ne prolazi
+  validaciju, petlja nastavlja na sljedeću pojavu. Isti obrazac primijenjen
+  i na tablice. Regresija-testirano sintetičkim primjerom koji reproducira
+  točno taj legenda-prije-vrijednosti scenarij (vidi bug #41 niže).
+- **Ekstrakcija tablica maknuta s unutarnje strane potpuno** - ta strana ih
+  nikad ne sadrži (korisnikova napomena).
+- **Novi endpoint za vanjsku stranu** (`/api/ocr/registration-doc-outer`,
+  novi `extractRegistrationOuterFields`) - cilj isključivo registracijska
+  oznaka, format-baziran pristup (ne label-baziran) jer je tablica na toj
+  strani standardno prikazana veliko i jasno bez potrebe za oslanjanjem na
+  točan raspored koda - Claude je bio transparentan da nema potvrđeno
+  znanje o točnom OCR tekstualnom rasporedu vanjske strane i predložio ovaj
+  pristup kao prvi prolaz, korisnik nije tražio referentnu sliku prije
+  nastavka.
+- Stari jedinstveni `/api/ocr/registration-doc` endpoint i `extractRegistrationFields`/
+  `extractRegistrationDocFromImage` funkcije uklonjeni (zamijenjeni s
+  `-inner`/`-outer` parovima), nema backward-compat sloja (mlada
+  funkcionalnost, nema postojećih podataka koji bi ovisili o starom obliku).
+- UI: oba slota (`/vehicles/new`, `/vehicles/[id]` dokumenti tab) sad imaju
+  odvojen upload input + "Skeniraj i prefilaj" gumb, s jasnom `→ polje`
+  caption ispod svakog ("Vanjska strana → registracija (tablice)" /
+  "Unutarnja strana → marka/model/VIN"). Polica osiguranja dobila istu
+  caption konvenciju ("→ datum isteka registracije (OCR dolazi u idućem
+  koraku)") - čisto label, bez nefunkcionalnog gumba, da UI ne obećava
+  nešto što još ne radi.
+- Verifikacija: `tsc --noEmit` čist na oba paketa, `next build` čist (nove
+  rute vidljive, stara uklonjena iz outputa), regex logika
+  sanity-testirana s 5 sintetičkih scenarija uklj. legenda-prije-vrijednosti
+  (vidi bug #41). **Nije testirano protiv stvarnih slika** - čeka
+  korisnikovu sljedeću rundu s pravim fotografijama obje strane prometne.
+  Nije commitano/pushano - čeka korisnikovu potvrdu.
+
+**Prijašnji dio iste sesije (sedmi/osmi nastavak) - bug #40 (owner web
+login loop) potpuno riješen, u dva sloja.** Prvi sloj (kod, vidi bug #40
+niže za pun dokazni lanac - Vercel logs, deploy provjera, izravno cookie
+mjerenje kroz Browser Pane): redirect fallback promijenjen s fiksne env
+varijable na stvarni request origin, commitano i pushano (`39ec9f2`).
+**Drugi sloj, otkriven kad je korisnik prijavio da fix "još ne radi" na
+NOVOM zahtjevu** (svjež magic link je vodio na `localhost:3000`) - korisnik
+je ispravno posumnjao da je "Site URL" u Supabase dashboardu (izvan
+koda/gita) i dalje `http://localhost:3000`. Potvrđeno **izravnim mjerenjem,
+ne pretpostavkom**: `supabase.auth.admin.generateLink()` s eksplicitnim
+`redirectTo` za `-ten` domenu vratio je stvarni `action_link` s
+`redirect_to=http://localhost:3000` - GoTrue tiho ZAMIJENI redirectTo sa
+Site URL kad redirectTo nije na allowlisti, bez greške pozivatelju. **Ovo
+je obezvrijedilo raniji zaključak "Supabase allowlista ima permisivan
+wildcard"** iz prvog kruga bug #40 dijagnoze - taj je zaključak bio
+POGREŠAN (izveden iz `signInWithOtp`-ovog `error` polja, koje ne
+odražava je li redirectTo stvarno prihvaćen ili tiho zamijenjen). Korisnik
+je ručno promijenio Site URL na
+`https://fleet-manager-web-branimir-s-projects1.vercel.app` i dodao
+`https://fleet-manager-web-ten.vercel.app/**` u Redirect URLs allowlistu
+(Authentication → URL Configuration). Ponovljen `generateLink` test nakon
+promjene - sve tri ciljne domene (`-ten`, `-branimir-s-projects1`, mobile
+`rentacarmanager://`) sad vraćaju ispravan `redirect_to`. **Stvaran
+magic-link klik nakon ovoga nije potvrđen u chatu** - korisnik je prešao
+na sljedeći zadatak (OCR redizajn) prije potvrde, treba zatražiti kad se
+vrati na temu.
 
 **Prijašnji dio iste sesije (šesti nastavak) - započet Tier 2 backlog.
 Prva stavka gotova: **OCR ekstrakcija podataka s prometne dozvole** (Google
@@ -1698,9 +1762,95 @@ tražio da se zapamte jer bi se mogli ponoviti.
     test od korisnika nakon deploya: zatraži link s `-ten` domene, klikni
     ga, potvrdi da landa na `/vehicles`.
 
+    **Dodatak - drugi sloj istog buga, korisnik prijavio da fix "još ne
+    radi" na SVJEŽEM zahtjevu.** Simptom se promijenio - link u mailu je
+    sad vodio na `http://localhost:3000` (`otp_expired`/connection refused,
+    ne `invalid_link`), što je korisnik ispravno prepoznao kao drugačiji
+    uzrok od prvog sloja: Supabase "Site URL" postavka (Authentication →
+    URL Configuration), izvan koda/gita. Potvrđeno izravnim mjerenjem
+    (`supabase.auth.admin.generateLink()`, `SUPABASE_SERVICE_ROLE_KEY`,
+    isti obrazac kao "Dopuna 2026-08-19" niže) - poziv s eksplicitnim
+    `redirectTo` za `-ten` domenu vratio je stvaran `action_link` s
+    `redirect_to=http://localhost:3000` u query stringu. Ovo otkriva
+    GoTrue ponašanje koje NIJE bilo poznato u prvom krugu dijagnoze: kad
+    `redirectTo` nije na Redirect URLs allowlisti, GoTrue ga **tiho
+    zamijeni sa Site URL** umjesto da vrati grešku pozivatelju.
+
+    **Ovo obezvrjeđuje raniji zaključak "Supabase allowlista ima
+    permisivan `*.vercel.app` wildcard"** iz glavnog dijela buga #40 gore -
+    taj zaključak je bio pogrešan, izveden iz `signInWithOtp`-ovog `error`
+    polja (koje ostaje `null` čak i kad je redirectTo tiho odbačen i
+    zamijenjen - "OK" odgovor NE znači da je traženi redirectTo stvarno
+    prihvaćen). Ispravna metoda provjere je `generateLink` + čitanje
+    stvarnog `action_link`/`redirect_to` iz odgovora, ne oslanjanje na
+    `error` polje drugih auth poziva.
+
+    **Fix (ručna izmjena u Supabase dashboardu, korisnik proveo):** Site
+    URL promijenjen s `http://localhost:3000` na
+    `https://fleet-manager-web-branimir-s-projects1.vercel.app`, i
+    `https://fleet-manager-web-ten.vercel.app/**` dodan u Redirect URLs
+    allowlistu (postojeći retci, uklj. `rentacarmanager://**` za mobile,
+    netaknuti). Ponovljen `generateLink` test nakon promjene za sve tri
+    ciljne domene (`-ten`, `-branimir-s-projects1`, mobile scheme) -
+    **sve tri sad vraćaju ispravan `redirect_to`, potvrđeno prije nego je
+    korisnik zatražen da išta klikne** (točno kako je korisnik i tražio -
+    provjeri prije traženja klika). **Stvaran magic-link klik nakon ovog
+    fixa nije potvrđen u chatu** - korisnik je prešao na sljedeći zadatak
+    prije potvrde, treba zatražiti taj test kad se razgovor vrati na temu.
+
+41. **VIN ekstrakcija (OCR, unutarnja strana prometne) hvatala tekst
+    legende umjesto stvarnog VIN-a kad dokument ima legendu koja objašnjava
+    EU šifre PRIJE retka sa stvarnim vrijednostima** (npr. "E -
+    Identifikacijski broj vozila" ranije u tekstu nego stvarni redak s
+    VIN-om). Otkriveno i popravljeno u istoj sesiji kao razdvajanje OCR-a
+    na vanjsku/unutarnju stranu (vidi arhitektonsku odluku niže), na
+    korisnikov eksplicitan zahtjev ("ne hvataj tekst iz legende koda").
+    Pravi uzrok: `matchByCode(rawText, "E") ?? matchVin(rawText)` - kad je
+    "E" šifra pronađena VIŠE puta (jednom u legendi, jednom uz stvarnu
+    vrijednost), `matchByCode` je uvijek vraćao PRVI pogodak bez ikakve
+    validacije da li stvarno izgleda kao VIN, pa je `?? matchVin(...)`
+    fallback bio kratko-spojen (nikad se nije ni izvršio jer je prvi dio
+    već vratio istinit, samo pogrešan, rezultat). Fix: novi
+    `findCodeValueWindows(text, code)` helper prolazi kroz SVAKU pojavu
+    šifre (ne samo prvu), i `matchVin` sad validira svaki kandidat protiv
+    strogog VIN regexa (`/\b[A-HJ-NPR-Z0-9]{17}\b/`, 17 znakova bez I/O/Q)
+    prije prihvaćanja - legenda ne prolazi validaciju pa se petlja
+    nastavlja na sljedeću pojavu koda. Isti obrazac primijenjen i na
+    tablice (`matchLicensePlate`, koristi se samo na vanjskoj strani).
+    Regresija-testirano sintetičkim primjerom koji točno reproducira
+    legenda-prije-vrijednosti redoslijed - stari kod bi vratio tekst
+    legende, novi kod ispravno vraća stvarni VIN sa sljedeće pojave šifre.
+    Vidi Tier 2 dnevnik na vrhu dokumenta za pun opis promjene.
+
 ---
 
 ## 3. Arhitektonske odluke i zašto
+
+**OCR: vanjska vs. unutarnja strana prometne - dva odvojena slota, ne
+jedan.** Korisnikov dizajn: prometna dozvola ima dvije fizičke strane s
+potpuno različitim podacima - vanjska prikazuje registracijsku oznaku
+veliko i jasno (bez tablice EU šifri), unutarnja ima tablicu harmoniziranih
+EU šifri (D.1 marka, D.3 model, E VIN) ali NIKAD tablice. Prvobitna
+implementacija (jedan `/api/ocr/registration-doc` endpoint koji je
+pokušavao izvući SVE iz jedne slike) je zamijenjena s dva potpuno odvojena
+endpointa/funkcije (`extractRegistrationInnerFields`/
+`extractRegistrationOuterFields`) - svaki traži samo ono što ta strana
+STVARNO sadrži, umjesto da oba pokušavaju sve pa se oslanjaju na to da
+OCR/regex "ne nađe" ono čega nema. Vanjska strana koristi format-baziran
+regex (ne label-baziran) jer Claude nema potvrđeno znanje o točnom OCR
+tekstualnom rasporedu te strane, ali korisnik je potvrdio da je tablica
+tamo standardno prikazana veliko i jasno - dovoljno za pouzdan
+format-baziran pristup bez potrebe za referentnom slikom u prvom prolazu.
+OCR slotovi su namjerno ODVOJENI od persistiranog "Spremi prometnu"
+uploada (koji ostaje jedan dokument kao prije) - svaki OCR slot je čisto
+ekstrakcija-za-prefill (ništa se ne uploada na Hetzner iz OCR poziva),
+osim postojećeg "unutarnja strana" slota u `/vehicles/[id]` koji i dalje
+ponovno koristi isti file koji je odabran za "Spremi prometnu" (praktičnost
+- ne treba dva puta birati isti fajl ako vlasnik i tako fotografira i sprema
+i skenira istu stranu). Polica osiguranja ima istu "svaki dokument svoj
+OCR" konvenciju u dizajnu, ali OCR za nju (PDF text-parsing datuma isteka
+registracije) je zaseban, još nedovršen Tier 2 korak - trenutno samo UI
+caption najavljuje što će vaditi, bez nefunkcionalnog gumba.
 
 **Owner/Client role razdvajanje preko DB tablice, ne Supabase custom claims.**
 `Owner` model (`id, email @unique, userId? @unique, name`) je izravna
@@ -2056,8 +2206,10 @@ kontekst za buduće sesije, ne počinjati bez eksplicitnog dogovora.
 4. (dopuna) Svi prikazani datumi u `DD.MM.GGGG.` formatu, web i mobile
 
 **Tier 2 — Dokument-generacija i ekstrakcija** (u tijeku, vidi dnevnik gore)
-- ✅ OCR ekstrakcija marke/modela/tablica/VIN-a s prometne (Google Vision) -
-  gotovo, kodno verificirano, čeka prvi test na stvarnoj prometnoj
+- ✅ OCR ekstrakcija marke/modela/VIN-a (unutarnja strana) i registracije
+  (vanjska strana), dva odvojena slota - gotovo, kodno verificirano,
+  uklj. VIN legenda-collision fix (bug #41), čeka prvi test na stvarnim
+  slikama obje strane
 - ⏳ Datum isteka registracije vaditi iz police osiguranja (PDF,
   tekst-parsing), NE s prometne (pečat prekriva datum na fizičkom
   dokumentu - korisnikova eksplicitna napomena, važno za implementaciju) -
