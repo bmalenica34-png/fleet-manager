@@ -454,12 +454,26 @@ export default function VehicleDetailPage() {
     }
 
     const result = await res.json();
+    const foundFields: string[] = [];
+
     if (result.registrationExpiresAt) {
       setRegistrationExpiresAt(result.registrationExpiresAt);
-      setInsuranceOcrNotice('Prepoznato: datum isteka registracije. Provjeri na kartici "Podaci o vozilu" i spremi.');
-    } else {
-      setInsuranceOcrNotice("Datum nije prepoznat - upiši ručno.");
+      foundFields.push("istek osiguranja");
     }
+    if (result.licensePlate) {
+      setLicensePlate(result.licensePlate);
+      foundFields.push("tablice");
+    }
+    if (result.vin) {
+      setVin(result.vin);
+      foundFields.push("VIN");
+    }
+
+    setInsuranceOcrNotice(
+      foundFields.length > 0
+        ? `Prepoznato: ${foundFields.join(", ")}. Napomena: datum isteka registracije je pretpostavljen iz isteka osiguranja (obično se poklapaju, ali provjeri). Provjeri na kartici "Podaci o vozilu" i spremi.`
+        : "Ništa nije prepoznato - upiši ručno."
+    );
   }
 
   if (loading) return <p className="muted">Učitavanje...</p>;
@@ -623,7 +637,7 @@ export default function VehicleDetailPage() {
       {innerOcrNotice && <p className="muted">{innerOcrNotice}</p>}
 
       <h2 style={{ marginTop: "2rem" }}>Polica osiguranja</h2>
-      <p className="muted" style={{ margin: "0.25rem 0" }}>→ datum isteka registracije</p>
+      <p className="muted" style={{ margin: "0.25rem 0" }}>→ istek osiguranja (procjena isteka registracije), tablice, VIN</p>
       {vehicle.insurancePolicyUrl && !insurancePreviewUrl && (
         <p>
           <a href={vehicle.insurancePolicyUrl} target="_blank" rel="noreferrer">

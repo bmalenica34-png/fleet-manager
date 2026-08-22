@@ -339,12 +339,26 @@ export default function VehicleDetail() {
     setInsuranceOcrNotice(null);
     try {
       const result = await ocrInsurancePolicy(insuranceOcrFile);
+      const foundFields: string[] = [];
+
       if (result.registrationExpiresAt) {
         setRegistrationExpiresAt(isoToHrDate(result.registrationExpiresAt));
-        setInsuranceOcrNotice("Prepoznato: datum isteka registracije. Provjeri na kartici 'Podaci' i spremi.");
-      } else {
-        setInsuranceOcrNotice("Datum nije prepoznat - upiši ručno.");
+        foundFields.push("istek osiguranja");
       }
+      if (result.licensePlate) {
+        setLicensePlate(result.licensePlate);
+        foundFields.push("tablice");
+      }
+      if (result.vin) {
+        setVin(result.vin);
+        foundFields.push("VIN");
+      }
+
+      setInsuranceOcrNotice(
+        foundFields.length > 0
+          ? `Prepoznato: ${foundFields.join(", ")}. Napomena: datum isteka registracije je pretpostavljen iz isteka osiguranja (obično se poklapaju). Provjeri na kartici 'Podaci' i spremi.`
+          : "Ništa nije prepoznato - upiši ručno."
+      );
     } catch (err) {
       setInsuranceOcrError(err instanceof Error ? err.message : "Ekstrakcija nije uspjela.");
     } finally {
@@ -613,7 +627,7 @@ export default function VehicleDetail() {
 
       <View style={styles.section}>
         <Text style={styles.sectionTitle}>Polica osiguranja</Text>
-        <Text style={styles.muted}>→ datum isteka registracije</Text>
+        <Text style={styles.muted}>→ istek osiguranja (procjena registracije), tablice, VIN</Text>
         {vehicle.insurancePolicyUrl ? (
           <Pressable onPress={() => Linking.openURL(vehicle.insurancePolicyUrl!)}>
             <Text style={styles.link}>Pregledaj trenutnu policu</Text>

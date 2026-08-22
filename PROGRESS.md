@@ -4,7 +4,60 @@ Dinamički log stanja projekta. Ažurira se na kraju svake sesije. Za statičnu
 arhitekturu/konvencije vidi [CLAUDE.md](CLAUDE.md) — ovaj dokument je "što je
 gotovo i zašto", ne "kako treba izgledati".
 
-**Zadnje ažurirano:** 2026-08-22, trinaesti nastavak - korisnik potvrdio
+**Zadnje ažurirano:** 2026-08-22, četrnaesti nastavak - korisnik poslao
+STVARAN PDF police osiguranja (Adriatic osiguranje AO, priloženo u chatu)
+i prijavio da ekstrakcija ne pogađa ovaj format ("Istek godišnjeg
+osiguranja" umjesto bilo koje fraze iz stare fiksne liste), eksplicitno
+tražio generalizaciju umjesto dodavanja još jednog keyworda. Vidi bug #44
+niže za pun dokazni lanac (stvaran tekst PDF-a, dva otkrivena buga u
+prvom prolazu generalizacije, sva 4 test scenarija na kraju prolaze).
+Ukratko:
+- **Ekstrakcija prepravljena s liste točnih fraza na širi
+  pattern-match:** red po red teksta, bilo koja riječ iz skupa ("istek"/
+  "isteka" prioritetno, "vrijedi do"/"važi do"/"važenja"/"trajanje"/
+  "razdoblje" kao širi fallback) + datum u ISTOM ili SLJEDEĆEM retku.
+  Otkriven i popravljen usput: stvaran PDF duplicira SVAKI redak teksta
+  (artefakt kako je dokument generiran) - bez deduplikacije susjednih
+  identičnih redaka, "sljedeći redak" nakon labela bi bio još jedna
+  kopija labela, ne stvarna vrijednost. Otkriven i popravljen DRUGI bug u
+  istom prolazu: kad je više datuma u istom retku ("od X do Y"), kod je
+  prvo uzimao PRVI (početak), ne ZADNJI (kraj) - regresija na starom
+  sintetičkom testu koja je odmah uhvaćena ponovnim pokretanjem svih
+  test scenarija prije prijave gotovosti.
+- **Arhitektonska odluka formalno dokumentirana** (vidi sekciju 3 niže,
+  "Polica osiguranja: istek osiguranja kao proxy za istek registracije")
+  - korisnik je eksplicitno pitao je li ovo bila namjerna odluka ili
+    slučajna konfuzija naziva. Odgovor: bila je namjerna pretpostavka,
+    ali je prije bila dokumentirana SAMO u kod komentaru (`extractInsurancePolicy.ts`),
+    nikad kao formalna arhitektonska odluka - sad ispravljeno. Stvaran
+    Adriatic primjer POTVRĐUJE pretpostavku (polica ima jasno razdvojeno
+    godišnje razdoblje osiguranja, ne doslovno polje "istek registracije"),
+    ali UI tekst je bio precizniji nego što stvarno jest - ažuriran svugdje
+    (web + oba mobile ekrana) da eksplicitno kaže "istek osiguranja
+    (procjena/pretpostavka isteka registracije)" umjesto da tvrdi "datum
+    isteka registracije" kao da je to doslovno pročitano polje.
+- **Nova paralelna ekstrakcija: tablice i VIN iz police** (uz postojeći
+  datum) - PDF tekstualni sloj je pouzdaniji izvor od slikovnog OCR-a
+  fotografirane prometne, pa vlasnik može unakrsno provjeriti. Marka/
+  model NAMJERNO nisu vađeni - polica ih navodi kao jedan spojen string
+  ("BMW, SERIJA 4 430I"), nema pouzdanog načina razdvojiti bez lomljivog
+  nagađanja. Novi dijeljeni `packages/api/src/ocr/patterns.ts`
+  (VIN_PATTERN/PLATE_PATTERN) - `extractRegistrationDoc.ts` refaktoriran
+  da ih uvozi odatle umjesto lokalne duplicirane definicije (čist
+  refactor, ponašanje nepromijenjeno, prometna OCR flow NIJE dirana kako
+  je korisnik tražio).
+- Verifikacija: `tsc --noEmit` čist na sva tri paketa (uklj. mobile-ov
+  lokalni `InsurancePolicyOcrResult` DTO u `api.ts`, koji je trebao ista
+  dva nova polja), `next build` i `expo export --platform ios` oba čista.
+  Regresija-testirano protiv auth rute (bug #43 i dalje popravljen -
+  `403`, ne crash) i protiv stvarnog Adriatic PDF-a kroz pravu rutu
+  (401 bez auth-a, kao očekivano - stvarna ekstrakcijska logika
+  potvrđena izravnim pozivom `extractInsurancePolicyFields` na stvaran
+  izvučen tekst PDF-a, vraća točno `registrationExpiresAt: "2027-07-07"`,
+  `licensePlate: "ZG1278JI"`, `vin: "WBA51AP05PCL47053"` - sve se poklapa
+  sa stvarnim sadržajem police).
+
+**Prijašnji dio iste sesije (trinaesti nastavak) - korisnik potvrdio
 da mobile magic-link login radi (bug #43 fix uspješan). Odmah zatim
 otkrio pravi nedostatak funkcionalnosti: **owner-mobile nema ekran za
 dodavanje NOVOG vozila** (`owner/vehicles/[id].tsx` postoji za uređivanje,
@@ -2076,9 +2129,104 @@ tražio da se zapamte jer bi se mogli ponoviti.
     ili zamjena `pdf-parse`/`pdfjs-dist`-a alternativnom bibliotekom bez
     canvas-zavisnih polyfilla za čistu tekst-ekstrakciju).
 
+44. **Ekstrakcija datuma isteka iz police osiguranja nije pogađala stvaran
+    dokument (Adriatic osiguranje AO polica, korisnik priložio pravi PDF u
+    chatu) - stara fiksna lista fraza nije sadržavala format ove
+    osiguravajuće kuće ("Istek godišnjeg osiguranja").** Korisnik
+    eksplicitno tražio generalizaciju (širi pattern-match, ne dodavanje
+    još jednog keyworda) uz test protiv OBA scenarija (stari sintetički +
+    novi stvaran PDF).
+
+    **Sirovi tekst stvarnog PDF-a otkrio je dvije stvari koje sintetički
+    testovi nisu pokrili:**
+    1. Label i vrijednost su na ODVOJENIM recima ("Istek godišnjeg
+       osiguranja:" svoj redak, "07.07.2027." tek SLJEDEĆI redak) - stara
+       `findKeywordWindows` logika je stala na sljedećem prijelomu retka
+       upravo da NE bi pokupila datum iz sljedeće nepovezane rečenice
+       (bug #42 window-sizing fix), što je sad postalo prestrogo za ovaj
+       layout.
+    2. PDF tekstualni sloj duplicira SVAKI redak zaredom (vjerojatno
+       artefakt kako je dokument generiran/rendered) - "Istek godišnjeg
+       osiguranja:" se pojavljuje dvaput prije nego se ijedan datum
+       uopće pojavi.
+
+    **Fix:** ekstrakcija prepravljena na red-po-red pristup: bilo koji
+    redak koji sadrži riječ iz skupa ("istek"/"isteka" prioritetno,
+    "vrijedi do"/"važi do"/"važenja"/"trajanje"/"razdoblje" kao širi
+    fallback sloj - vidi Tier 2 dnevnik na vrhu dokumenta zašto je
+    prioritet nužan, ne ravan skup) + datum u ISTOM ili SLJEDEĆEM retku.
+    Deduplikacija susjednih identičnih redaka prije skeniranja rješava
+    duplicirani-redak artefakt (no-op za dokumente bez tog artefakta -
+    sigurno za sintetičke testove). Postojeći fallback (najkasniji datum
+    bilo gdje u dokumentu) zadržan kao sigurnosna mreža, nepromijenjen.
+
+    **Prvi prolaz generalizacije je UNIO regresiju, uhvaćenu prije prijave
+    gotovosti jer je korisnik eksplicitno tražio ponovni test protiv
+    starog sintetičkog scenarija.** Kad je više datuma u istom retku
+    ("Razdoblje osiguranja: od 15.03.2026. do 15.03.2027.", oba datuma na
+    jednom retku), novi red-po-red kod je uzimao PRVI datum (početak
+    razdoblja) umjesto ZADNJEG (kraj) - vraćalo bi `2026-03-15` umjesto
+    ispravnog `2027-03-15`. Popravljeno da `extractDateFromLine` uzima
+    zadnji valjan datum u retku, ne prvi.
+
+    **Verifikacija - sva 4 scenarija u istom testnom prolazu, izravno
+    protiv `pdf-parse`-ove stvarno izvučene ekstrakcije teksta (ne
+    ručno sastavljen tekst):** stari sintetički "razdoblje osiguranja"
+    (`2027-03-15`, ispravno nakon regresija-fixa), stari sintetički
+    "tehnički pregled vrijedi do" (`2027-06-20`, nepromijenjeno), stari
+    sintetički fallback bez keyworda (`2026-10-10`, nepromijenjeno),
+    **stvaran Adriatic PDF** (`2027-07-07`, potvrđeno protiv stvarnog
+    sadržaja police - "Istek godišnjeg osiguranja: 07.07.2027.").
+
+    **Usput dodano (korisnik eksplicitno pozvao na razmišljanje, ne
+    obavezan zahtjev):** tablice i VIN se sad TAKOĐER vade iz police kao
+    paralelni, usporedni izvor uz postojeći OCR fotografije prometne -
+    PDF tekstualni sloj police je pouzdaniji (nema rizika krivog čitanja
+    znakova kao slikovni OCR). Stvaran primjer potvrđuje: `licensePlate:
+    "ZG1278JI"`, `vin: "WBA51AP05PCL47053"`, oboje točno kako stoji na
+    polici. Marka/model NAMJERNO nisu vađeni - polica ih navodi kao jedan
+    spojen string ("BMW, SERIJA 4 430I"), nema pouzdanog načina razdvojiti
+    marku od modela/trima bez lomljivog nagađanja. Postojeći OCR flow za
+    prometnu (`extractRegistrationDoc.ts`) NIJE mijenjan - samo je
+    refaktoriran da dijeli VIN/tablice regex obrasce s novim
+    `packages/api/src/ocr/patterns.ts` umjesto lokalne duplicirane
+    definicije (čist refactor, ponašanje nepromijenjeno).
+
+    Vidi arhitektonsku odluku "Polica osiguranja: istek osiguranja kao
+    proxy za istek registracije" (sekcija 3) za odgovor na korisnikovo
+    pitanje je li ta pretpostavka bila namjerna - bila je, ali je prije
+    bila dokumentirana samo u kod komentaru, sad formalno zapisana kao
+    arhitektonska odluka s jasnim UI posljedicama.
+
 ---
 
 ## 3. Arhitektonske odluke i zašto
+
+**Polica osiguranja: istek osiguranja kao proxy za istek registracije -
+namjerna pretpostavka, ne konfuzija naziva.** `Vehicle.registrationExpiresAt`
+je JEDINO polje u shemi za ovaj koncept (postojalo je prije OCR-a, kad se
+ručno unosio). Kad je OCR ekstrakcija dodana za policu osiguranja, jedini
+dostupan podatak na hrvatskim policama obveznog auto-osiguranja (AO) je
+RAZDOBLJE OSIGURANJA (npr. "Trajanje osiguranja - Jednogodišnje" /
+"Istek godišnjeg osiguranja: 07.07.2027.", potvrđeno na stvarnom Adriatic
+primjeru) - police NE navode doslovno "istek registracije" kao svoje
+polje. Pretpostavka (dokumentirana samo u kod komentaru dok korisnik nije
+eksplicitno pitao je li namjerna ili slučajna): obvezno auto-osiguranje u
+RH standardno prati valjanost registracije, jer obnova registracije
+zahtijeva važeću policu za taj period - u praksi se datumi obično
+poklapaju, ali ovo NIJE formalno potvrđeno za sve slučajeve (npr.
+polica plaćena unaprijed na više godina, ili registracija obnovljena bez
+odmah obnovljene police, teoretski mogu razići se). Odluka: **zadržati
+JEDNO polje u bazi** (`registrationExpiresAt`, ne dodavati zaseban
+`insuranceExpiresAt` - bila bi to veća shema promjena bez jasne
+trenutne potrebe, vlasnik svejedno ručno potvrđuje/ispravlja prije
+spremanja), ali **UI tekst mora biti precizan o izvoru** - notice poruke
+i caption ispod OCR gumba (web + oba mobile ekrana) eksplicitno kažu
+"istek osiguranja (procjena isteka registracije)", ne tvrde da je
+doslovno pročitano polje "istek registracije". Ako se ikad pokaže da
+razmimoilaženje nije rijetkost (korisnička povratna informacija iz
+stvarne upotrebe), razdvajanje u zasebno polje postaje opravdano - do
+tada, jedno polje s preciznijim UI opisom je dovoljno.
 
 **OCR: vanjska vs. unutarnja strana prometne - dva odvojena slota, ne
 jedan.** Korisnikov dizajn: prometna dozvola ima dvije fizičke strane s

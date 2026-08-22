@@ -263,6 +263,11 @@ export function ocrRegistrationDocInner(file: PickedFile): Promise<RegistrationD
 
 export interface InsurancePolicyOcrResult {
   registrationExpiresAt?: string;
+  // Pomoćni, usporedni izvor uz OCR fotografije prometne - PDF tekstualni
+  // sloj police je pouzdaniji od slikovnog OCR-a (nema rizika krivog
+  // čitanja znakova).
+  licensePlate?: string;
+  vin?: string;
   rawText: string;
 }
 

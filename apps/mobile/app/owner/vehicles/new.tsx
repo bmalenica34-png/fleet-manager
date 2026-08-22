@@ -169,12 +169,26 @@ export default function NewVehicleScreen() {
     setInsuranceOcrNotice(null);
     try {
       const result = await ocrInsurancePolicy(insuranceOcrFile);
+      const foundFields: string[] = [];
+
       if (result.registrationExpiresAt) {
         setRegistrationExpiresAt(isoToHrDate(result.registrationExpiresAt));
-        setInsuranceOcrNotice("Prepoznato: datum isteka registracije. Provjeri prije spremanja.");
-      } else {
-        setInsuranceOcrNotice("Datum nije prepoznat - upiši ručno.");
+        foundFields.push("istek osiguranja");
       }
+      if (result.licensePlate) {
+        setLicensePlate(result.licensePlate);
+        foundFields.push("tablice");
+      }
+      if (result.vin) {
+        setVin(result.vin);
+        foundFields.push("VIN");
+      }
+
+      setInsuranceOcrNotice(
+        foundFields.length > 0
+          ? `Prepoznato: ${foundFields.join(", ")}. Napomena: datum isteka registracije je pretpostavljen iz isteka osiguranja (obično se poklapaju). Provjeri prije spremanja.`
+          : "Ništa nije prepoznato - upiši ručno."
+      );
     } catch (err) {
       setInsuranceOcrError(err instanceof Error ? err.message : "Ekstrakcija nije uspjela.");
     } finally {
@@ -288,7 +302,7 @@ export default function NewVehicleScreen() {
 
       <View style={styles.section}>
         <Text style={styles.sectionTitle}>Polica osiguranja (OCR)</Text>
-        <Text style={styles.muted}>→ datum isteka registracije</Text>
+        <Text style={styles.muted}>→ istek osiguranja (procjena registracije), tablice, VIN</Text>
         {insuranceOcrFile && <Text style={styles.muted}>Odabrano: {insuranceOcrFile.name}</Text>}
         <Pressable
           style={[styles.buttonSecondary, insuranceOcrLoading && styles.buttonDisabled]}

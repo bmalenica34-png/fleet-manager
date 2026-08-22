@@ -1,8 +1,6 @@
 import { detectDocumentText } from "./vision";
+import { PLATE_PATTERN, VIN_PATTERN } from "./patterns";
 import type { RegistrationDocOcrResult } from "../schemas/ocr";
-
-const VIN_PATTERN = /\b[A-HJ-NPR-Z0-9]{17}\b/;
-const PLATE_PATTERN = /\b([A-Z]{2})[\s-]?(\d{3,4})[\s-]?([A-Z]{1,2})\b/;
 
 // Hrvatska prometna dozvola koristi harmonizirane EU šifre polja - tražimo
 // ih prve jer su najpouzdanije kad OCR uspije pohvatati oznaku uz vrijednost
