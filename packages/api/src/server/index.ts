@@ -13,6 +13,7 @@ export * from "./auth";
 export * from "./registrationReminders";
 export * from "./photoRequests";
 export * from "../ocr/extractRegistrationDoc";
+export * from "../ocr/extractInsurancePolicy";
 export * from "../storage/hetzner";
 export * from "../lib/email";
 export * from "../lib/signing-token";

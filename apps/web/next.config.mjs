@@ -6,8 +6,17 @@ const nextConfig = {
   experimental: {
     // @react-pdf/renderer's internal reconciler breaks when Next bundles it
     // through the RSC webpack layer (wrong "react" resolution there) -
-    // load it as a plain Node require instead.
-    serverComponentsExternalPackages: ["@react-pdf/renderer", "@react-pdf/reconciler"],
+    // load it as a plain Node require instead. pdf-parse (via pdfjs-dist,
+    // used for insurance policy text extraction) hits the same class of
+    // bug for a different reason: "TypeError: Object.defineProperty called
+    // on non-object" when pdfjs-dist's ESM build is routed through the RSC
+    // bundling layer - confirmed via actual runtime error, not guessed.
+    serverComponentsExternalPackages: [
+      "@react-pdf/renderer",
+      "@react-pdf/reconciler",
+      "pdf-parse",
+      "pdfjs-dist",
+    ],
   },
   webpack: (config, { isServer }) => {
     // Next's file tracing misses the Prisma query engine binary in this

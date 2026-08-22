@@ -4,9 +4,47 @@ Dinamički log stanja projekta. Ažurira se na kraju svake sesije. Za statičnu
 arhitekturu/konvencije vidi [CLAUDE.md](CLAUDE.md) — ovaj dokument je "što je
 gotovo i zašto", ne "kako treba izgledati".
 
-**Zadnje ažurirano:** 2026-08-21, deveti nastavak - OCR na prometnoj
+**Zadnje ažurirano:** 2026-08-22, deseti nastavak - korisnik potvrdio da su
+OCR razdvajanje prometne (vanjska/unutarnja) I login fix (bug #40) uspješno
+testirani uživo. Odmah zatim implementirana **zadnja Tier 2 stavka: PDF
+text-parsing police osiguranja za datum isteka registracije** - novi
+`packages/api/src/ocr/pdfText.ts` (`pdf-parse` v2, PDF-ov ugrađeni
+tekstualni sloj, NE Vision OCR - polica je generirani dokument s pravim
+tekstom, ne fotografija) + `extractInsurancePolicy.ts` (keyword-anchored
+pretraga datuma - "istek registracije"/"tehnički pregled"/"vrijedi do"/
+"razdoblje osiguranja" i sl., prioritet od najspecifičnijeg izraza,
+fallback na najkasniji datum bilo gdje u dokumentu). Nova ruta
+`POST /api/ocr/insurance-policy`, gumb "Skeniraj i prefilaj" na `/vehicles/
+[id]` policа kartici (zamijenio raniji placeholder caption).
+
+**Usput otkriven i popravljen stvaran runtime bug, isti razred kao bug #11
+(@react-pdf/renderer u RSC webpack sloju), ovaj put za `pdf-parse`/
+`pdfjs-dist`.** Prvi pokušaj (`experimental.serverComponentsExternalPackages`,
+isti recept kao bug #11) NIJE upalio - potvrđeno stvarnom runtime greškom
+(`TypeError: Object.defineProperty called on non-object` iz
+`pdfjs-dist/legacy/build/pdf.mjs` kroz Next-ov `(rsc)` webpack sloj), ne
+pretpostavkom, inspekcijom stvarnog `.next` build outputa (vidi bug #42
+niže za pun dokazni lanac). Konačan fix: `pdf-parse` dodan kao direktna
+ovisnost i `apps/web`-u (ne samo `packages/api`) - pod pnpm strict
+izolacijom, Next-ov externalPackages tracer ne uspijeva pratiti paket koji
+je resolvable SAMO iz tranzitivne ovisnosti. Verificirano stvarnim
+runtime pozivom kroz Next dev server (privremena debug ruta bez auth-a,
+uklonjena nakon testiranja) - 3 sintetička PDF scenarija (keyword-anchored,
+specifičniji keyword, čist fallback), sva tri vraćaju točan datum. Usput
+otkriven i popravljen bug u window-sizing logici (prvi pokušaj je hvatao
+datum iz SLJEDEĆE, nepovezane rečenice jer je prozor bio fiksnih 100
+znakova umjesto da stane na sljedećem retku).
+
+**Tier 2 backlog je sad potpuno gotov** (OCR prometne + polica), osim
+opcionalne stavke "OCR za osobnu/vozačku" koja nikad nije bila obavezna.
+Nije još commitano/pushano - čeka korisnikovu potvrdu i idealno test na
+stvarnoj polici (heuristika za točan naziv polja na hrvatskoj polici je
+prvi prolaz, nije potvrđena protiv pravog dokumenta).
+
+**Prijašnji dio iste sesije (osmi/deveti nastavak) - OCR na prometnoj
 dozvoli razdvojen na dva odvojena slota (vanjska/unutarnja strana) po
 korisnikovom dizajnu, plus popravljen VIN ekstrakcijski bug otkriven usput.
+Korisnik je naknadno potvrdio da je ovo testirano i radi.**
 Vidi arhitektonsku odluku "OCR: vanjska vs. unutarnja strana prometne"
 niže za pun opis. Ukratko:
 - **VIN fix (unutarnja strana):** stari `matchVin` je hvatao PRVI tekst
@@ -1822,6 +1860,62 @@ tražio da se zapamte jer bi se mogli ponoviti.
     legende, novi kod ispravno vraća stvarni VIN sa sljedeće pojave šifre.
     Vidi Tier 2 dnevnik na vrhu dokumenta za pun opis promjene.
 
+42. ⚠️ **`pdf-parse`/`pdfjs-dist` (nova ovisnost za OCR police osiguranja)
+    puca s `TypeError: Object.defineProperty called on non-object` kad se
+    pozove kroz stvaran Next.js API route - isti razred buga kao bug #11
+    (`@react-pdf/renderer`), ali `experimental.serverComponentsExternalPackages`
+    recept koji je riješio bug #11 OVDJE NIJE upalio prvi put.** Otkriveno
+    tako što je `next build` prošao čisto (kao i kod bug #11), ali stvaran
+    poziv kroz `curl` na dev server vratio `500` - potvrđuje pravilo iz
+    bug #11: build success ≠ runtime correctness za Node-only pakete kroz
+    RSC bundling sloj, treba stvaran runtime poziv, ne samo build.
+
+    **Dijagnoza, korak po korak, sve potvrđeno inspekcijom stvarnog
+    outputa/grešaka, ne pretpostavkom:**
+    1. `next build` čist, ali `curl -X POST .../api/ocr/insurance-policy`
+       (bez auth-a, samo da se provjeri da li se modul uopće učita) vratio
+       `500`. `preview_logs` otkrio stack trace: greška u
+       `webpack-internal:///(rsc)/.../pdfjs-dist/legacy/build/pdf.mjs`,
+       pozvana iz `pdf-parse`, pozvano iz `packages/api/src/ocr/pdfText.ts`.
+    2. Dodan `pdf-parse`/`pdfjs-dist` u `serverComponentsExternalPackages`
+       (identičan recept kao bug #11) - **identična greška, bez promjene.**
+       Inspekcija `.next/server/vendor-chunks/pdfjs-dist.js` pokazala
+       PUNI bundlani izvorni kod (2.5MB), ne tanki `require()` wrapper -
+       eksternalizacija se STVARNO nije dogodila, unatoč config unosu.
+       Usporedba s `@react-pdf/renderer`-ovim vendor chunkom (koji ISTO
+       postoji kao datoteka, ali svejedno radi) pokazala da samoća
+       postojanja vendor-chunk datoteke ne dokazuje da eksternalizacija
+       nije uspjela - trebalo je dublje kopanje.
+    3. Pokušan `webpackIgnore: true` magic comment na dinamičkom
+       `import("pdf-parse")` (forsira Node-ov nativni ESM loader mimo
+       webpacka) - **napredak, ali druga greška:** `ERR_MODULE_NOT_FOUND`,
+       Node ne može resolvati "pdf-parse" iz `apps/web/.next/server/...`
+       lokacije. Pravi uzrok otkriven: pod pnpm strict izolacijom,
+       `pdf-parse` je instaliran SAMO u `packages/api/node_modules`
+       (tranzitivna ovisnost za `apps/web`), pa Node-ov runtime resolver
+       (koji, za razliku od webpacka, ne prati monorepo workspace graf)
+       ne može ga naći kad izvršava kod iz `apps/web`-ovog compiled
+       outputa.
+    4. **Pravi fix:** `pdf-parse` dodan kao DIREKTNA ovisnost i
+       `apps/web`-u (`pnpm --filter web add pdf-parse
+       --virtual-store-dir=C:/v`, isti CLI flag workaround kao bug #18),
+       `webpackIgnore` hack uklonjen (vraćen normalan static import),
+       `serverComponentsExternalPackages` unos zadržan. Ovo je vjerojatno
+       i pravi razlog zašto ni originalni `serverComponentsExternalPackages`
+       pokušaj (korak 2) nije radio - Next-ov tracer za taj mehanizam
+       vjerojatno također ovisi o tome da je paket resolvable iz samog
+       `apps/web`-a, ne samo tranzitivno.
+
+    **Verifikacija: stvaran runtime poziv kroz Next dev server, ne samo
+    build.** Privremena debug ruta bez auth-a (`/api/ocr/_debugtest`,
+    preimenovana iz `_debug-insurance-test` jer Next tretira `_`-prefiksane
+    foldere kao private route segmente - 404 umjesto izvršavanja rute, prvi
+    pokušaj testiranja), uklonjena nakon testiranja. 3 sintetička PDF-a
+    generirana kroz `@react-pdf/renderer` (stvaran PDF, ne mock), poslana
+    kroz `curl -F` na stvarnu rutu: sva tri vratila `200` s ispravno
+    izvučenim datumom (vidi Tier 2 dnevnik na vrhu za detalje o
+    ekstrakcijskoj logici i drugom bugu otkrivenom usput - window-sizing).
+
 ---
 
 ## 3. Arhitektonske odluke i zašto
@@ -2205,17 +2299,17 @@ kontekst za buduće sesije, ne počinjati bez eksplicitnog dogovora.
 3. Trajanje najma kao broj dana → auto-izračun datuma povrata
 4. (dopuna) Svi prikazani datumi u `DD.MM.GGGG.` formatu, web i mobile
 
-**Tier 2 — Dokument-generacija i ekstrakcija** (u tijeku, vidi dnevnik gore)
+**Tier 2 — Dokument-generacija i ekstrakcija** (obavezne stavke gotove)
 - ✅ OCR ekstrakcija marke/modela/VIN-a (unutarnja strana) i registracije
-  (vanjska strana), dva odvojena slota - gotovo, kodno verificirano,
-  uklj. VIN legenda-collision fix (bug #41), čeka prvi test na stvarnim
-  slikama obje strane
-- ⏳ Datum isteka registracije vaditi iz police osiguranja (PDF,
+  (vanjska strana), dva odvojena slota - **testirano uživo od korisnika,
+  potvrđeno da radi** (uklj. VIN legenda-collision fix, bug #41)
+- ✅ Datum isteka registracije vaditi iz police osiguranja (PDF,
   tekst-parsing), NE s prometne (pečat prekriva datum na fizičkom
-  dokumentu - korisnikova eksplicitna napomena, važno za implementaciju) -
-  nije rađeno
+  dokumentu) - kodno gotovo i runtime-verificirano (bug #42, sintetički
+  PDF-ovi kroz stvarnu rutu), **čeka prvi test na stvarnoj polici** -
+  heuristika za naziv polja nije potvrđena protiv pravog dokumenta
 - ⏳ Opcionalno: OCR ekstrakcija osobne/vozačke za prefil client podataka u
-  ugovoru - nije rađeno
+  ugovoru - nije rađeno (nikad nije bila obavezna stavka)
 - ⏳ Generator punomoći za registraciju vozila (PDF, fiksni predložak: podaci
   tvrtke + vozila + zaposlenika, print-ready) - vozila su vlasništvo
   tvrtke, zaposlenici idu registrirati - nije rađeno
