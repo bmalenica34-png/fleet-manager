@@ -4,7 +4,37 @@ Dinamički log stanja projekta. Ažurira se na kraju svake sesije. Za statičnu
 arhitekturu/konvencije vidi [CLAUDE.md](CLAUDE.md) — ovaj dokument je "što je
 gotovo i zašto", ne "kako treba izgledati".
 
-**Zadnje ažurirano:** 2026-08-22, dvanaesti nastavak - **P0 regresija:
+**Zadnje ažurirano:** 2026-08-22, trinaesti nastavak - korisnik potvrdio
+da mobile magic-link login radi (bug #43 fix uspješan). Odmah zatim
+otkrio pravi nedostatak funkcionalnosti: **owner-mobile nema ekran za
+dodavanje NOVOG vozila** (`owner/vehicles/[id].tsx` postoji za uređivanje,
+`new.tsx` nikad nije postojao - potvrđeno u prijašnjoj sesiji, ne
+regresija). Napravljen `apps/mobile/app/owner/vehicles/new.tsx` po uzoru
+na web `/vehicles/new` + postojeći mobile edit ekran: dropdown marka/model
+(chips, isti obrazac kao edit ekran)/godina, tablice, VIN, datum isteka
+registracije (DD.MM.GGGG. tekstualni unos + `parseHrDateToIso` validacija).
+**Sva tri OCR slota** (vanjska/unutarnja strana prometne, polica
+osiguranja) - korisnik eksplicitno tražio sva tri i ovdje, iako web-ov
+`/vehicles/new` trenutno ima samo dva (vanjska+unutarnja, ne policu, jer
+polica upload postoji tek na edit ekranu) - mobile ovdje ide MALO ISPRED
+weba po korisnikovom eksplicitnom zahtjevu (owner možda ima PDF police
+pri ruci dok unosi novo vozilo, korisno prefilati datum isteka registracije
+i prije nego vozilo uopće postoji, iako se sam PDF ne može trajno spremiti
+dok vozilo ne postoji). Isti dvokoračni flow kao web: `new.tsx` NE uploada
+nikakve trajne dokumente (samo tri OCR ekstrakcijska poziva za prefill),
+"Spremi vozilo" kreira vozilo (`POST /api/vehicles`, nova `createVehicle`
+funkcija u `api.ts`) pa `router.replace` na postojeći edit ekran
+(`/owner/vehicles/[id]`) gdje se stvarni upload prometne/police/slika
+odvija - isti obrazac kao `contracts/new.tsx` (`router.replace`, ne
+`push`, da "natrag" ne vrati na praznu formu). Dodan "+ Dodaj vozilo" gumb
+na `owner/vehicles/index.tsx` (prije nije postojao nijedan način da se
+dođe do ovog ekrana) - identičan `newButton` stil kao već postojeći
+"+ Novi ugovor" na `contracts/index.tsx`. Verifikacija: `tsc --noEmit`
+čist, `npx expo export --platform ios` uspješno izbundlao 1216 modula
+(raslo s 1215, očekivano za jedan novi ekran). **Nije testirano na
+uređaju** - korisnik treba novi EAS build.
+
+**Prijašnji dio iste sesije (dvanaesti nastavak) - P0 regresija:
 `pdf-parse` je slomio OWNER I CLIENT LOGIN u produkciji (ne samo mobile),
 otkriveno i popravljeno.** Korisnik prijavio `request_failed_500` na
 mobile magic-link zahtjevu, eksplicitno tražio pravi log prije fixa. Vidi

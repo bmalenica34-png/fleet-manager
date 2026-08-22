@@ -41,6 +41,10 @@ export default function VehiclesList() {
         <View style={{ width: 60 }} />
       </View>
 
+      <Pressable style={styles.newButton} onPress={() => router.push("/owner/vehicles/new")}>
+        <Text style={styles.newButtonText}>+ Dodaj vozilo</Text>
+      </Pressable>
+
       {loading ? (
         <ActivityIndicator style={{ marginTop: 24 }} />
       ) : error ? (
@@ -77,6 +81,14 @@ const styles = StyleSheet.create({
   title: { fontSize: 20, fontWeight: "600" },
   body: { fontSize: 16, color: "#444", textAlign: "center", marginTop: 24 },
   error: { color: "#c00", textAlign: "center", marginTop: 24 },
+  newButton: {
+    borderWidth: 1,
+    borderColor: "#111",
+    padding: 12,
+    borderRadius: 8,
+    alignItems: "center",
+  },
+  newButtonText: { color: "#111", fontWeight: "600" },
   row: {
     borderWidth: 1,
     borderColor: "#ccc",

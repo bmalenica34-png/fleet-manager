@@ -101,6 +101,22 @@ export function getVehicle(id: string): Promise<VehicleDTO> {
   return apiFetch(`/api/vehicles/${id}`);
 }
 
+export interface VehicleCreateInput {
+  make: string;
+  model: string;
+  year?: number;
+  licensePlate: string;
+  vin?: string;
+  registrationExpiresAt?: string;
+}
+
+export function createVehicle(input: VehicleCreateInput): Promise<VehicleDTO> {
+  return apiFetch("/api/vehicles", {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+}
+
 export interface VehicleUpdateInput {
   make?: string;
   model?: string;
