@@ -221,6 +221,41 @@ export function deleteVehicleImage(vehicleId: string, imageId: string): Promise<
   return apiFetch(`/api/vehicles/${vehicleId}/images/${imageId}`, { method: "DELETE" });
 }
 
+// --- OCR (Tier 2 backlog) ---
+// Sva tri endpointa su standalone (ne vezani na vehicleId) i ne sprema
+// ništa - samo vraćaju prijedlog polja za prefill, isti obrazac kao web
+// (vidi apps/web/src/app/api/ocr/*). Koriste uploadPickedFile umjesto
+// apiFetch-a jer i OCR pozivi šalju fajl kao multipart tijelo.
+export interface RegistrationDocOcrResult {
+  make?: string;
+  model?: string;
+  licensePlate?: string;
+  vin?: string;
+  rawText: string;
+}
+
+// Vanjska strana prometne - cilj isključivo registracijska oznaka.
+export function ocrRegistrationDocOuter(file: PickedFile): Promise<RegistrationDocOcrResult> {
+  return uploadPickedFile("/api/ocr/registration-doc-outer", file, "file");
+}
+
+// Unutarnja strana prometne - marka/model/VIN, NIKAD tablice (ta strana ih
+// ne sadrži).
+export function ocrRegistrationDocInner(file: PickedFile): Promise<RegistrationDocOcrResult> {
+  return uploadPickedFile("/api/ocr/registration-doc-inner", file, "file");
+}
+
+export interface InsurancePolicyOcrResult {
+  registrationExpiresAt?: string;
+  rawText: string;
+}
+
+// PDF text-parsing (ne Vision OCR) - polica je generirani dokument s pravim
+// tekstualnim slojem, backend odbija sve što nije application/pdf.
+export function ocrInsurancePolicy(file: PickedFile): Promise<InsurancePolicyOcrResult> {
+  return uploadPickedFile("/api/ocr/insurance-policy", file, "file");
+}
+
 // --- Klijenti ---
 export interface ClientRecord {
   id: string;

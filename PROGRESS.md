@@ -4,9 +4,40 @@ Dinamički log stanja projekta. Ažurira se na kraju svake sesije. Za statičnu
 arhitekturu/konvencije vidi [CLAUDE.md](CLAUDE.md) — ovaj dokument je "što je
 gotovo i zašto", ne "kako treba izgledati".
 
-**Zadnje ažurirano:** 2026-08-22, deseti nastavak - korisnik potvrdio da su
+**Zadnje ažurirano:** 2026-08-22, jedanaesti nastavak - sva tri OCR slota
+(vanjska/unutarnja strana prometne, polica osiguranja) prenesena s weba na
+`owner-mobile` (`apps/mobile/app/owner/vehicles/[id].tsx` - `new.tsx` ne
+postoji na mobileu, potvrđeno prije rada, owner-mobile nema vehicle-creation
+flow, samo edit). **Čisto UI posao, nema novog backend koda** - postojeći
+`/api/ocr/registration-doc-outer`, `/api/ocr/registration-doc-inner`,
+`/api/ocr/insurance-policy` endpointi su već platform-agnostic (Bearer-auth
+preko `requireOwnerSession`, isti kao svi ostali owner API pozivi). Tri
+nove funkcije u `src/lib/api.ts` (`ocrRegistrationDocOuter/Inner`,
+`ocrInsurancePolicy`), sve koriste postojeći `uploadPickedFile` helper
+(`expo-file-system` `File.upload()`, isti obrazac kao `uploadVehicle
+RegistrationDoc`/`InsurancePolicy` - vidi bug #30 zašto NE goli
+`apiFetch`+`FormData`). Odabir fajla ide preko `expo-document-picker`
+(`type: ["image/*"]` za oba prometna slota, `type: ["application/pdf"]`
+za policu) - identičan poziv-oblik kao postojeći `handlePickRegistrationDoc`/
+`handlePickInsurancePolicy`, samo uži `type` filter po slotu. Svaki slot je
+dvokoračan (odaberi pa "Skeniraj i prefilaj" kao odvojen gumb - isti UX kao
+web, daje vlasniku priliku provjeriti odabir prije poziva) i potpuno
+odvojen od postojećih persisted-upload gumba (OCR ne sprema ništa, čisto
+prefill). Unutarnja strana i polica OCR blokovi su smješteni UNUTAR
+postojećih "Prometna"/"Polica osiguranja" sekcija (dodatni gumbi), vanjska
+strana je nova zasebna sekcija iznad "Prometna". `ActivityIndicator` na
+"Skeniraj i prefilaj" gumbu dok poziv traje (Vision API/PDF parsing može
+potrajati par sekundi). Marka/model/VIN prefill logika (uklj. VEHICLE_MAKES
+match/fallback na "Ostalo") i ISO→`DD.MM.GGGG.` konverzija datuma
+(`isoToHrDate`) kopirane 1:1 iz web ekvivalenta. Verifikacija: `tsc
+--noEmit` čist, `npx expo export --platform ios` uspješno izbundlao 1215
+modula (raslo s 1176 iz faze 2, očekivano). **Nije testirano na uređaju**
+(Claude Browser Pane ne prikazuje Expo app) - korisnik treba novi EAS
+build da vidi na telefonu, kao i za sve prijašnje mobile promjene.
+
+**Prijašnji dio iste sesije (deseti nastavak) - korisnik potvrdio da su
 OCR razdvajanje prometne (vanjska/unutarnja) I login fix (bug #40) uspješno
-testirani uživo. Odmah zatim implementirana **zadnja Tier 2 stavka: PDF
+testirani uživo. Odmah zatim implementirana zadnja Tier 2 stavka (web): PDF
 text-parsing police osiguranja za datum isteka registracije** - novi
 `packages/api/src/ocr/pdfText.ts` (`pdf-parse` v2, PDF-ov ugrađeni
 tekstualni sloj, NE Vision OCR - polica je generirani dokument s pravim

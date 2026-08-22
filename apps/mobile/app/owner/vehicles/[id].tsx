@@ -27,6 +27,9 @@ import {
   deleteVehicleImage,
   getVehicle,
   listContracts,
+  ocrInsurancePolicy,
+  ocrRegistrationDocInner,
+  ocrRegistrationDocOuter,
   updateVehicle,
   uploadVehicleImages,
   uploadVehicleInsurancePolicy,
@@ -74,6 +77,25 @@ export default function VehicleDetail() {
   const [insuranceError, setInsuranceError] = useState<string | null>(null);
   const [uploadingImages, setUploadingImages] = useState(false);
   const [imagesError, setImagesError] = useState<string | null>(null);
+
+  // OCR prefill - tri odvojena slota (vanjska/unutarnja strana prometne,
+  // polica osiguranja), svaki sa svojim staged fajlom (odabir i skeniranje
+  // su dva odvojena koraka, isti obrazac kao web) - ne sprema ništa,
+  // vlasnik uvijek pregleda/ispravi prefilana polja prije "Spremi promjene".
+  const [outerOcrFile, setOuterOcrFile] = useState<PickedFile | null>(null);
+  const [outerOcrLoading, setOuterOcrLoading] = useState(false);
+  const [outerOcrError, setOuterOcrError] = useState<string | null>(null);
+  const [outerOcrNotice, setOuterOcrNotice] = useState<string | null>(null);
+
+  const [innerOcrFile, setInnerOcrFile] = useState<PickedFile | null>(null);
+  const [innerOcrLoading, setInnerOcrLoading] = useState(false);
+  const [innerOcrError, setInnerOcrError] = useState<string | null>(null);
+  const [innerOcrNotice, setInnerOcrNotice] = useState<string | null>(null);
+
+  const [insuranceOcrFile, setInsuranceOcrFile] = useState<PickedFile | null>(null);
+  const [insuranceOcrLoading, setInsuranceOcrLoading] = useState(false);
+  const [insuranceOcrError, setInsuranceOcrError] = useState<string | null>(null);
+  const [insuranceOcrNotice, setInsuranceOcrNotice] = useState<string | null>(null);
 
   const [activeTab, setActiveTab] = useState<VehicleTab>("info");
   const [contracts, setContracts] = useState<ContractListItem[]>([]);
@@ -218,6 +240,115 @@ export default function VehicleDetail() {
       setInsuranceError(err instanceof Error ? err.message : "Greška prilikom uploada");
     } finally {
       setUploadingInsurance(false);
+    }
+  }
+
+  async function pickImageFor(setFile: (file: PickedFile) => void) {
+    const result = await DocumentPicker.getDocumentAsync({ type: ["image/*"] });
+    if (result.canceled || !result.assets?.[0]) return;
+    const asset = result.assets[0];
+    setFile({
+      uri: asset.uri,
+      name: asset.name,
+      mimeType: asset.mimeType ?? "image/jpeg",
+    });
+  }
+
+  async function handleOuterOcrScan() {
+    if (!outerOcrFile) return;
+    setOuterOcrLoading(true);
+    setOuterOcrError(null);
+    setOuterOcrNotice(null);
+    try {
+      const result = await ocrRegistrationDocOuter(outerOcrFile);
+      if (result.licensePlate) {
+        setLicensePlate(result.licensePlate);
+        setOuterOcrNotice("Prepoznato: tablice. Provjeri na kartici 'Podaci' i spremi.");
+      } else {
+        setOuterOcrNotice("Tablice nisu prepoznate - upiši ručno.");
+      }
+    } catch (err) {
+      setOuterOcrError(err instanceof Error ? err.message : "Skeniranje nije uspjelo.");
+    } finally {
+      setOuterOcrLoading(false);
+    }
+  }
+
+  async function handleInnerOcrScan() {
+    if (!innerOcrFile) return;
+    setInnerOcrLoading(true);
+    setInnerOcrError(null);
+    setInnerOcrNotice(null);
+    try {
+      const result = await ocrRegistrationDocInner(innerOcrFile);
+      const foundFields: string[] = [];
+
+      if (result.make) {
+        if (VEHICLE_MAKES.includes(result.make)) {
+          setMake(result.make);
+          setModel("");
+          setCustomModel("");
+        } else {
+          setMake(OTHER_VEHICLE_OPTION);
+          setCustomMake(result.make);
+        }
+        foundFields.push("marka");
+      }
+      if (result.model) {
+        const models = VEHICLE_MODELS_BY_MAKE[result.make ?? make] ?? [];
+        if (models.includes(result.model)) {
+          setModel(result.model);
+        } else {
+          setModel(OTHER_VEHICLE_OPTION);
+          setCustomModel(result.model);
+        }
+        foundFields.push("model");
+      }
+      if (result.vin) {
+        setVin(result.vin);
+        foundFields.push("VIN");
+      }
+
+      setInnerOcrNotice(
+        foundFields.length > 0
+          ? `Prepoznato: ${foundFields.join(", ")}. Provjeri na kartici 'Podaci' i spremi.`
+          : "Nije prepoznato nijedno polje - upiši ručno."
+      );
+    } catch (err) {
+      setInnerOcrError(err instanceof Error ? err.message : "Skeniranje nije uspjelo.");
+    } finally {
+      setInnerOcrLoading(false);
+    }
+  }
+
+  async function handlePickInsuranceOcrFile() {
+    const result = await DocumentPicker.getDocumentAsync({ type: ["application/pdf"] });
+    if (result.canceled || !result.assets?.[0]) return;
+    const asset = result.assets[0];
+    setInsuranceOcrFile({
+      uri: asset.uri,
+      name: asset.name,
+      mimeType: asset.mimeType ?? "application/pdf",
+    });
+  }
+
+  async function handleInsuranceOcrScan() {
+    if (!insuranceOcrFile) return;
+    setInsuranceOcrLoading(true);
+    setInsuranceOcrError(null);
+    setInsuranceOcrNotice(null);
+    try {
+      const result = await ocrInsurancePolicy(insuranceOcrFile);
+      if (result.registrationExpiresAt) {
+        setRegistrationExpiresAt(isoToHrDate(result.registrationExpiresAt));
+        setInsuranceOcrNotice("Prepoznato: datum isteka registracije. Provjeri na kartici 'Podaci' i spremi.");
+      } else {
+        setInsuranceOcrNotice("Datum nije prepoznat - upiši ručno.");
+      }
+    } catch (err) {
+      setInsuranceOcrError(err instanceof Error ? err.message : "Ekstrakcija nije uspjela.");
+    } finally {
+      setInsuranceOcrLoading(false);
     }
   }
 
@@ -407,7 +538,36 @@ export default function VehicleDetail() {
       {activeTab === "documents" && (
       <>
       <View style={styles.section}>
+        <Text style={styles.sectionTitle}>Vanjska strana prometne (OCR)</Text>
+        <Text style={styles.muted}>→ registracija (tablice)</Text>
+        {outerOcrFile && <Text style={styles.muted}>Odabrano: {outerOcrFile.name}</Text>}
+        <Pressable
+          style={[styles.buttonSecondary, outerOcrLoading && styles.buttonDisabled]}
+          onPress={() => pickImageFor(setOuterOcrFile)}
+          disabled={outerOcrLoading}
+        >
+          <Text style={styles.buttonSecondaryText}>Odaberi sliku</Text>
+        </Pressable>
+        {outerOcrFile && (
+          <Pressable
+            style={[styles.buttonSecondary, outerOcrLoading && styles.buttonDisabled]}
+            onPress={handleOuterOcrScan}
+            disabled={outerOcrLoading}
+          >
+            {outerOcrLoading ? (
+              <ActivityIndicator />
+            ) : (
+              <Text style={styles.buttonSecondaryText}>Skeniraj i prefilaj</Text>
+            )}
+          </Pressable>
+        )}
+        {outerOcrError && <Text style={styles.error}>{outerOcrError}</Text>}
+        {outerOcrNotice && <Text style={styles.muted}>{outerOcrNotice}</Text>}
+      </View>
+
+      <View style={styles.section}>
         <Text style={styles.sectionTitle}>Prometna</Text>
+        <Text style={styles.muted}>Unutarnja strana → marka/model/VIN</Text>
         {vehicle.registrationDocUrl ? (
           <Pressable onPress={() => Linking.openURL(vehicle.registrationDocUrl!)}>
             <Text style={styles.link}>Pregledaj trenutnu prometnu</Text>
@@ -425,10 +585,35 @@ export default function VehicleDetail() {
           </Text>
         </Pressable>
         {docError && <Text style={styles.error}>{docError}</Text>}
+
+        {innerOcrFile && <Text style={styles.muted}>Odabrano za skeniranje: {innerOcrFile.name}</Text>}
+        <Pressable
+          style={[styles.buttonSecondary, innerOcrLoading && styles.buttonDisabled]}
+          onPress={() => pickImageFor(setInnerOcrFile)}
+          disabled={innerOcrLoading}
+        >
+          <Text style={styles.buttonSecondaryText}>Odaberi sliku za OCR</Text>
+        </Pressable>
+        {innerOcrFile && (
+          <Pressable
+            style={[styles.buttonSecondary, innerOcrLoading && styles.buttonDisabled]}
+            onPress={handleInnerOcrScan}
+            disabled={innerOcrLoading}
+          >
+            {innerOcrLoading ? (
+              <ActivityIndicator />
+            ) : (
+              <Text style={styles.buttonSecondaryText}>Skeniraj i prefilaj</Text>
+            )}
+          </Pressable>
+        )}
+        {innerOcrError && <Text style={styles.error}>{innerOcrError}</Text>}
+        {innerOcrNotice && <Text style={styles.muted}>{innerOcrNotice}</Text>}
       </View>
 
       <View style={styles.section}>
         <Text style={styles.sectionTitle}>Polica osiguranja</Text>
+        <Text style={styles.muted}>→ datum isteka registracije</Text>
         {vehicle.insurancePolicyUrl ? (
           <Pressable onPress={() => Linking.openURL(vehicle.insurancePolicyUrl!)}>
             <Text style={styles.link}>Pregledaj trenutnu policu</Text>
@@ -446,6 +631,30 @@ export default function VehicleDetail() {
           </Text>
         </Pressable>
         {insuranceError && <Text style={styles.error}>{insuranceError}</Text>}
+
+        {insuranceOcrFile && <Text style={styles.muted}>Odabrano za skeniranje: {insuranceOcrFile.name}</Text>}
+        <Pressable
+          style={[styles.buttonSecondary, insuranceOcrLoading && styles.buttonDisabled]}
+          onPress={handlePickInsuranceOcrFile}
+          disabled={insuranceOcrLoading}
+        >
+          <Text style={styles.buttonSecondaryText}>Odaberi PDF za OCR</Text>
+        </Pressable>
+        {insuranceOcrFile && (
+          <Pressable
+            style={[styles.buttonSecondary, insuranceOcrLoading && styles.buttonDisabled]}
+            onPress={handleInsuranceOcrScan}
+            disabled={insuranceOcrLoading}
+          >
+            {insuranceOcrLoading ? (
+              <ActivityIndicator />
+            ) : (
+              <Text style={styles.buttonSecondaryText}>Skeniraj i prefilaj</Text>
+            )}
+          </Pressable>
+        )}
+        {insuranceOcrError && <Text style={styles.error}>{insuranceOcrError}</Text>}
+        {insuranceOcrNotice && <Text style={styles.muted}>{insuranceOcrNotice}</Text>}
       </View>
       </>
       )}
