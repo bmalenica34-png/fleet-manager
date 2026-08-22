@@ -4,7 +4,37 @@ Dinamički log stanja projekta. Ažurira se na kraju svake sesije. Za statičnu
 arhitekturu/konvencije vidi [CLAUDE.md](CLAUDE.md) — ovaj dokument je "što je
 gotovo i zašto", ne "kako treba izgledati".
 
-**Zadnje ažurirano:** 2026-08-22, jedanaesti nastavak - sva tri OCR slota
+**Zadnje ažurirano:** 2026-08-22, dvanaesti nastavak - **P0 regresija:
+`pdf-parse` je slomio OWNER I CLIENT LOGIN u produkciji (ne samo mobile),
+otkriveno i popravljeno.** Korisnik prijavio `request_failed_500` na
+mobile magic-link zahtjevu, eksplicitno tražio pravi log prije fixa. Vidi
+bug #43 niže za pun dokazni lanac - ukratko: `Vercel Function Logs`
+otkrili `ReferenceError: DOMMatrix is not defined` iz `pdfjs-dist` na
+`POST /api/auth/owner/request-link` - ruta koja NIKAD ne dira OCR. Uzrok:
+`packages/api/src/server/index.ts` je `export *` barrel, pa je statički
+top-level `import` u `pdfText.ts` (dodano prošle sesije za policu
+osiguranja) povukao `pdf-parse`/`pdfjs-dist` u SVAKU rutu koja uvozi bilo
+što iz tog barrela - **web login je bio JEDNAKO slomljen kao mobile**, ne
+samo mobile-specifičan problem kako je isprva sumnjano. Fix: import
+promijenjen u dinamički (`await import("pdf-parse")` unutar funkcije koja
+ga stvarno treba), commitano i **odmah pushano uz eksplicitnu korisnikovu
+potvrdu** (P0 - aktivan prekid logina za sve korisnike). Verificirano
+DIREKTNO protiv produkcije nakon deploya (ne pretpostavkom): `curl` na
+istu rutu koja je prije pucala vraća čist `403 not_authorized` (očekivano
+za neovlašten email), Vercel logovi potvrđuju `info` razinu, ne `error`.
+Sve tri OCR rute također provjerene (401 unauthorized, bez crasha).
+**Preostaje neriješeno:** DOMMatrix problem je samo IZOLIRAN (ne curi više
+u nepovezane rute), ne i stvarno popravljen za slučaj kad se
+insurance-policy OCR STVARNO pozove (autentificirano, sa stvarnim PDF-om) -
+lokalni `next build`+`next start` na Windowsu NE reproducira crash (dokazano
+probom), što znači da moja ranija "verifikacija" te funkcionalnosti prošle
+sesije (lokalni dev server) nije reprezentativna za Vercelov Linux
+serverless runtime. Insurance-policy OCR treba stvaran test u produkciji
+prije nego se smatra pouzdano radnim - ako i dalje puca s istom DOMMatrix
+greškom, treba dodatni fix (npr. `@napi-rs/canvas` ovisnost, ili
+alternativna PDF text-parsing biblioteka bez canvas-zavisnih polyfilla).
+
+**Prijašnji dio iste sesije (jedanaesti nastavak) - sva tri OCR slota
 (vanjska/unutarnja strana prometne, polica osiguranja) prenesena s weba na
 `owner-mobile` (`apps/mobile/app/owner/vehicles/[id].tsx` - `new.tsx` ne
 postoji na mobileu, potvrđeno prije rada, owner-mobile nema vehicle-creation
@@ -1946,6 +1976,75 @@ tražio da se zapamte jer bi se mogli ponoviti.
     kroz `curl -F` na stvarnu rutu: sva tri vratila `200` s ispravno
     izvučenim datumom (vidi Tier 2 dnevnik na vrhu za detalje o
     ekstrakcijskoj logici i drugom bugu otkrivenom usput - window-sizing).
+    **Ova verifikacija je bila NEDOVOLJNA - propustila je bug #43 ispod,
+    jer je rađena samo protiv `next dev`, ne protiv stvarnog produkcijskog
+    builda/Vercel runtimea.**
+
+43. ⚠️⚠️ **P0 regresija iz buga #42 - `pdf-parse` je slomio OWNER I CLIENT
+    LOGIN u produkciji (ne samo OCR rutu, ne samo mobile).** Korisnik
+    prijavio `request_failed_500` na mobile magic-link zahtjevu nakon
+    novog EAS builda, ispravno posumnjao da je vezano za OCR promjenu iz
+    buga #42 i eksplicitno tražio pravi log prije bilo kakvog fixa.
+
+    **Dijagnoza, sve potvrđeno stvarnim dokazom:**
+    1. `vercel logs` na `POST /api/auth/owner/request-link` (ruta koju
+       mobile poziva za magic link) otkrio `ReferenceError: DOMMatrix is
+       not defined` iz `pdfjs-dist/legacy/build/pdf.mjs` - na ruti koja
+       NIKAD ne poziva OCR. Ovo odmah isključuje korisnikovu treću
+       hipotezu (Site URL/redirectTo validacija) - crash se događa PRIJE
+       ijednog Supabase poziva, na razini modul-importa same rute.
+    2. **Kritičan nalaz: budući da web i mobile owner login idu kroz ISTU
+       rutu, web login je bio JEDNAKO slomljen kao mobile** - ovo nije
+       bio mobile-specifičan problem, nego globalna produkcijska
+       regresija za sve owner/client prijave, uzrokovana prošlom sesijom.
+    3. Pravi uzrok: `packages/api/src/server/index.ts` je `export *`
+       barrel. Statički top-level `import { PDFParse } from "pdf-parse"`
+       u `pdfText.ts` (bug #42) znači da SVAKA ruta koja uvozi bilo što iz
+       tog barrela (npr. `isEmailAllowedAsOwner` u `owner/request-link`)
+       povlači pdf-parse/pdfjs-dist u svoj modul-graf i izvršava njegov
+       top-level kod (uklj. neuspio DOMMatrix polyfill pokušaj) ČAK I KAD
+       ta ruta nikad ne poziva OCR funkciju.
+    4. Pokušaj reprodukcije lokalno kroz PRAVI produkcijski build
+       (`next build` + `next start`, ne `next dev` koji je korišten za
+       bug #42-ovu "verifikaciju") na istoj ruti - **NIJE reproducirao
+       crash** (čist `403 not_authorized`). Ovo dokazuje da lokalni
+       Windows produkcijski build i Vercelov Linux serverless runtime
+       imaju stvarno različito ponašanje za ovaj specifičan slučaj -
+       razlog nije dublje istražen (vjerojatno platform-specifično
+       ponašanje u pdfjs-dist-ovom `require("@napi-rs/canvas")`
+       try/catch fallbacku), ali je bitna metodološka pouka: **`next
+       build` uspjeh, čak ni lokalni `next start`, ne garantira da će se
+       runtime ponašanje poklapati s Vercelovim produkcijskim
+       okruženjem za Node-only pakete sa platform-specifičnim kodom.**
+
+    **Fix:** `pdfText.ts`-ov `pdf-parse` uvoz promijenjen s top-level
+    statičkog na dinamički (`await import("pdf-parse")` unutar
+    `extractPdfText` funkcije) - modul se sad evaluira TEK kad se OCR
+    police stvarno pozove, ne kad bilo koja ruta uveze bilo što iz
+    barrela. `grep` potvrdio da nema drugih statičkih `pdf-parse` uvoza
+    igdje u kodu.
+
+    **Verifikacija: izravno protiv PRAVE produkcije nakon deploya, ne
+    lokalno.** Nakon što je fix pushan (uz eksplicitnu korisnikovu potvrdu
+    zbog P0 hitnosti) i deploy potvrđen gotovim (`vercel ls`), `curl` na
+    TOČNO istu rutu koja je prije pucala vratio čist `403 not_authorized`
+    (očekivano za testni neovlašten email, ne 500), `vercel logs` potvrdio
+    `info` razinu za taj zahtjev (ne `error`). Sve tri OCR rute također
+    provjerene izravno protiv produkcije (401 unauthorized, bez crasha -
+    modul se sad učitava čisto svugdje).
+
+    **Preostaje neriješeno, niži prioritet od login fixa:** DOMMatrix
+    problem je samo IZOLIRAN (više ne curi u nepovezane rute), NIJE
+    stvarno riješen za slučaj kad se insurance-policy OCR stvarno pozove
+    (autentificirano, sa stvarnim PDF-om) - to je točno kad se dinamički
+    `import("pdf-parse")` izvrši, pa bi isti DOMMatrix crash mogao i dalje
+    pogoditi SAMU OCR funkcionalnost u produkciji (samo više ne curi na
+    login). Nije testirano zbog auth ograničenja (isti PKCE limit kao
+    uvijek). **Prava OCR-za-policu funkcionalnost treba stvaran test u
+    produkciji prije nego se smatra pouzdano radnom** - ako i dalje puca,
+    treba dodatni fix (npr. `@napi-rs/canvas` kao eksplicitna ovisnost,
+    ili zamjena `pdf-parse`/`pdfjs-dist`-a alternativnom bibliotekom bez
+    canvas-zavisnih polyfilla za čistu tekst-ekstrakciju).
 
 ---
 
