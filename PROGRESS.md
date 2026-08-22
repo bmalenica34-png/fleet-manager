@@ -4,7 +4,25 @@ Dinamički log stanja projekta. Ažurira se na kraju svake sesije. Za statičnu
 arhitekturu/konvencije vidi [CLAUDE.md](CLAUDE.md) — ovaj dokument je "što je
 gotovo i zašto", ne "kako treba izgledati".
 
-**Zadnje ažurirano:** 2026-08-22, četrnaesti nastavak - korisnik poslao
+**Zadnje ažurirano:** 2026-08-22, petnaesti nastavak - korisnik testirao
+policu osiguranja OCR na novom EAS buildu (novi `/vehicles/new` mobile
+ekran), dobio `parse_failed`. Ovo je TOČNO neriješeni rizik zabilježen na
+kraju buga #43 - potvrđeno `vercel logs` (ne pretpostavkom): `Reference
+Error: DOMMatrix is not defined` iz `pdfjs-dist`-a, sad unutar OCR rute
+samе (izolacija iz buga #43 je radila - ne curi više u login, ali sama
+OCR ekstrakcija i dalje puca). Vidi bug #45 niže. Fix: `packages/api/src/
+ocr/pdfText.ts` sad postavlja minimalne stub-ove za `DOMMatrix`/`Path2D`/
+`ImageData` na `globalThis` PRIJE dinamičkog uvoza `pdf-parse`-a - poznat
+workaround za pdfjs-dist u Node okruženju bez canvas biblioteke kad je
+potrebna samo tekst-ekstrakcija (ne pravi rendering). Verificirano lokalno
+da ekstrakcija i dalje radi ispravno sa stub-ovima aktivnim (stvaran
+Adriatic PDF, isti tekst kao prije). **NIJE moguće lokalno reproducirati
+originalni crash** (Windows next build/start ionako nikad nije pucao,
+razlog te razlike nikad nije utvrđen - vidi bug #43), pa ovaj fix čeka
+stvaran test u produkciji nakon idućeg EAS builda/deploya prije nego se
+smatra potvrđeno riješenim.
+
+**Prijašnji dio iste sesije (četrnaesti nastavak) - korisnik poslao
 STVARAN PDF police osiguranja (Adriatic osiguranje AO, priloženo u chatu)
 i prijavio da ekstrakcija ne pogađa ovaj format ("Istek godišnjeg
 osiguranja" umjesto bilo koje fraze iz stare fiksne liste), eksplicitno
@@ -2197,6 +2215,49 @@ tražio da se zapamte jer bi se mogli ponoviti.
     pitanje je li ta pretpostavka bila namjerna - bila je, ali je prije
     bila dokumentirana samo u kod komentaru, sad formalno zapisana kao
     arhitektonska odluka s jasnim UI posljedicama.
+
+45. ⚠️ **Neriješeni rizik zabilježen na kraju buga #43 se ostvario -
+    insurance-policy OCR je stvarno pucao u produkciji** (`parse_failed`),
+    korisnik uhvatio na stvarnom testu novog `/vehicles/new` mobile
+    ekrana s pravim Adriatic PDF-om. `vercel logs` potvrdio identičan
+    mehanizam kao bug #43, samo sad IZOLIRAN unutar same OCR rute (bug
+    #43-ov fix je ispravno spriječio curenje u nepovezane rute - ruta je
+    vratila čist `502 parse_failed` odgovor, ne srušila cijeli proces):
+    ```
+    Warning: Cannot load "@napi-rs/canvas" package: "Error: Cannot find module..."
+    Warning: Cannot polyfill `DOMMatrix`, rendering may be broken.
+    ReferenceError: DOMMatrix is not defined
+        at pdfjs-dist/legacy/build/pdf.mjs:15620:22
+    ```
+    Pravi uzrok: `pdfjs-dist` pokušava polyfill-ati `DOMMatrix`/`Path2D`/
+    `ImageData` preko opcionalnog `@napi-rs/canvas` paketa (nije
+    instaliran - namjerno, ne treba nam pravi rendering, samo `getText()`).
+    Kad taj paket nije dostupan, pdfjs-dist pada natrag na VLASTITI
+    manualni polyfill pokušaj - koji je pokvaren u ovoj verziji (baca
+    umjesto da tiho degradira).
+
+    **Fix:** `pdfText.ts` sad postavlja minimalne stub-implementacije za
+    `DOMMatrix`/`Path2D`/`ImageData` na `globalThis` (uvjetno,
+    `typeof === "undefined"`, da ne prepiše pravu implementaciju ako je
+    ikad dostupna) PRIJE dinamičkog uvoza `pdf-parse`-a - poznat community
+    workaround za pdfjs-dist u Node okruženju bez canvas biblioteke kad je
+    potrebna samo tekst-ekstrakcija. Ne treba stvarna matrica/canvas
+    funkcionalnost za `getText()`, samo da modul-level kod pdfjs-dist-a
+    prestane pucati na referenci koja ne postoji.
+
+    **Verifikacija:** `tsc --noEmit` i `next build` čisti. Ekstrakcija
+    protiv stvarnog Adriatic PDF-a lokalno i dalje vraća identičan tekst
+    sa stub-ovima aktivnim (nema regresije). **NIJE moguće lokalno
+    reproducirati originalni crash** (isti razlog kao bug #43 - lokalni
+    Windows `next build`+`next start` nikad nije pucao, uzrok te razlike
+    između Windows i Vercelovog Linux runtimea nikad nije utvrđen) - ovaj
+    fix čeka stvaran test u produkciji (novi deploy + korisnikov stvaran
+    test s PDF-om, isti kao što je otkrio ovaj bug) prije nego se smatra
+    potvrđeno riješenim. Ako i dalje puca, sljedeći koraci: (a) probati
+    `@napi-rs/canvas` kao eksplicitnu ovisnost (rizik: native binary +
+    Vercel file-tracing, isti razred problema kao Prisma query engine
+    binary), ili (b) zamjena `pdf-parse`/`pdfjs-dist`-a alternativnom
+    bibliotekom bez canvas-zavisnih polyfilla (npr. `unpdf`).
 
 ---
 
