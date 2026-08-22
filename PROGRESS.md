@@ -4,7 +4,45 @@ Dinamički log stanja projekta. Ažurira se na kraju svake sesije. Za statičnu
 arhitekturu/konvencije vidi [CLAUDE.md](CLAUDE.md) — ovaj dokument je "što je
 gotovo i zašto", ne "kako treba izgledati".
 
-**Zadnje ažurirano:** 2026-08-22, petnaesti nastavak - korisnik testirao
+**Zadnje ažurirano:** 2026-08-22, šesnaesti nastavak - korisnik ponovio
+test s istim PDF-om nakon petnaestog nastavka, `parse_failed` I DALJE
+prisutan. Korisnik eksplicitno tražio pravi log prije bilo kakvog drugog
+pokušaja (ne nagađati drugi polyfill). Svjež `vercel logs` otkrio DRUGI,
+RAZLIČIT crash - DOMMatrix fix je uspio (taj dio više ne puca), ali odmah
+iza njega novi: `Error: Setting up fake worker failed: "Cannot find
+module '.../pdfjs-dist/legacy/build/pdf.worker.mjs'"`. Vidi bug #45
+dodatak niže za pun dokazni lanac i mehanizam. Ukratko:
+- pdfjs-dist u Node okruženju bez pravog Worker konteksta ("fake worker")
+  interno radi `import(this.workerSrc)` gdje je `this.workerSrc` RUNTIME
+  IZRAČUNATA varijabla, ne statički string literal - Next-ov file tracer
+  (`@vercel/nft`) prati SAMO statičke import specifiere, pa `pdf.worker.mjs`
+  (2MB, stvarno potreban) nikad nije uključen u Vercel serverless bundle.
+- Pronađen i iskorišten pdfjs-dist-ov SLUŽBENI izlaz za točno ovaj slučaj
+  (čitanjem stvarnog izvornog koda `pdf.mjs`, ne dokumentacije/nagađanja):
+  ako je `globalThis.pdfjsWorker.WorkerMessageHandler` već postavljen,
+  pdfjs-dist preskače dinamički import u potpunosti. Fix: `pdfText.ts`
+  sad SAM uvozi `pdfjs-dist/legacy/build/pdf.worker.mjs` (i dalje
+  dinamički pozvano - zadržava odgodu iz buga #43 - ali specifier je
+  statički string literal, pa GA Next-ov tracer MOŽE pratiti) i postavlja
+  taj global PRIJE poziva `pdf-parse`-a.
+- `pdfjs-dist` dodan kao eksplicitna direktna ovisnost i `packages/api`-u
+  i `apps/web`-u (isti razlog i obrazac kao `pdf-parse` u bugu #43 -
+  tranzitivna ovisnost nije pouzdano resolvable odande gdje se ruta
+  stvarno izvršava). Nova ambient `.d.ts` deklaracija (dupliciran u OBA
+  paketa - `apps/web`-ov tsconfig `include` ne seže izvan vlastitog
+  direktorija, pa deklaracija iz `packages/api` nije vidljiva čak ni kad
+  se `pdfText.ts` type-checka kao dio `apps/web` kompilacije preko
+  `transpilePackages`) jer `pdfjs-dist` ne izvozi tipove za ovaj duboki
+  worker subpath.
+- Verifikacija: `tsc --noEmit` čist na oba paketa, `next build` čist,
+  ekstrakcija protiv stvarnog Adriatic PDF-a lokalno i dalje vraća
+  identičan tekst s oba fixa aktivna (nema regresije), regresija-testirano
+  protiv auth rute (bug #43 fix i dalje drži). **Kao i prošli put, NIJE
+  moguće lokalno reproducirati originalni crash** (Windows build/start
+  nikad nije pucao ni za ovaj drugi crash) - čeka stvaran test u
+  produkciji nakon deploya.
+
+**Prijašnji dio iste sesije (petnaesti nastavak) - korisnik testirao
 policu osiguranja OCR na novom EAS buildu (novi `/vehicles/new` mobile
 ekran), dobio `parse_failed`. Ovo je TOČNO neriješeni rizik zabilježen na
 kraju buga #43 - potvrđeno `vercel logs` (ne pretpostavkom): `Reference
@@ -2258,6 +2296,68 @@ tražio da se zapamte jer bi se mogli ponoviti.
     Vercel file-tracing, isti razred problema kao Prisma query engine
     binary), ili (b) zamjena `pdf-parse`/`pdfjs-dist`-a alternativnom
     bibliotekom bez canvas-zavisnih polyfilla (npr. `unpdf`).
+
+    **Dodatak - opcija (a) se ostvarila, DOMMatrix fix nije bio dovoljan.**
+    Korisnik ponovio test s istim PDF-om, `parse_failed` i dalje prisutan,
+    eksplicitno tražio pravi log prije bilo kakvog drugog pokušaja umjesto
+    nagađanja sljedećeg polyfilla. Svjež `vercel logs` potvrdio: DOMMatrix
+    fix JEST uspio (taj specifičan crash više se ne pojavljuje), ali odmah
+    iza njega novi, drugačiji crash:
+    ```
+    Error: Setting up fake worker failed: "Cannot find module
+    '.../pdfjs-dist/legacy/build/pdf.worker.mjs'".
+    ```
+    Pravi uzrok pronađen čitanjem STVARNOG izvornog koda `pdfjs-dist`-a
+    (`node_modules/pdfjs-dist/legacy/build/pdf.mjs`, `PDFWorker` klasa),
+    ne dokumentacije ni nagađanja: u Node okruženju bez pravog Worker
+    konteksta, pdfjs-dist radi "fake worker" (izvršava worker kod u istom
+    procesu) preko `await import(this.workerSrc)`, gdje je `this.workerSrc`
+    RUNTIME IZRAČUNATA vrijednost (`GlobalWorkerOptions.workerSrc`, string
+    varijabla), NE statički string literal. Next-ov file tracer
+    (`@vercel/nft`, isti mehanizam koji Vercel koristi da odluči koje
+    datoteke ući u serverless bundle) prati SAMO statičke import
+    specifiere - dinamički import s izračunatom putanjom je za njega
+    nevidljiv, pa `pdf.worker.mjs` (2MB, stvarno potreban fajl za rad)
+    nikad nije bio uključen u produkcijski bundle, iako fizički postoji u
+    `node_modules`. Isti razred problema kao Prisma query engine binary
+    (`next.config.mjs`-ov `PrismaPlugin`), samo za drugi paket.
+
+    **Fix koristi pdfjs-dist-ov vlastiti, službeno podržani izlaz za točno
+    ovaj slučaj** (vidljivo u `PDFWorker.#mainThreadWorkerMessageHandler`/
+    `_setupFakeWorkerGlobal` getteru): ako je `globalThis.pdfjsWorker.
+    WorkerMessageHandler` već postavljen PRIJE nego se worker treba
+    pokrenuti, pdfjs-dist preskače dinamički import u potpunosti i koristi
+    taj global izravno. `pdfText.ts` sad sam radi
+    `import("pdfjs-dist/legacy/build/pdf.worker.mjs")` (i dalje unutar
+    funkcije - zadržava odgodu iz buga #43, ne izvršava se dok se OCR
+    stvarno ne pozove) i postavlja `globalThis.pdfjsWorker` prije poziva
+    `pdf-parse`-a. Ključna razlika koja ovo čini traceable za razliku od
+    pdfjs-dist-ovog internog poziva: specifier je STATIČKI STRING LITERAL
+    (`"pdfjs-dist/legacy/build/pdf.worker.mjs"`), ne varijabla - Next-ov
+    tracer prati dinamičke importe s literal putanjama, samo ne s
+    izračunatim. `pdfjs-dist` dodan kao eksplicitna direktna ovisnost i
+    `packages/api`-u i `apps/web`-u (isti razlog i obrazac kao `pdf-parse`
+    u bugu #43 - tranzitivna ovisnost nije pouzdano resolvable odande gdje
+    se ruta stvarno izvršava). Nova ambient `.d.ts` deklaracija
+    (`pdfjs-worker.d.ts`, dupliciran u OBA paketa - `apps/web`-ov
+    tsconfig `include` ne seže izvan vlastitog direktorija stabla, pa
+    deklaracija iz `packages/api` nije vidljiva čak ni kad se `pdfText.ts`
+    type-checka kao dio `apps/web` kompilacije preko `transpilePackages`)
+    jer `pdfjs-dist` ne izvozi tipove za ovaj duboki worker subpath.
+
+    **Verifikacija:** `tsc --noEmit` čist na oba paketa, `next build` čist,
+    ekstrakcija protiv stvarnog Adriatic PDF-a lokalno i dalje vraća
+    identičan tekst s oba fixa (DOMMatrix + worker) aktivna - nema
+    regresije. Regresija-testirano protiv auth rute (bug #43 fix i dalje
+    drži - `403`, ne crash). **Kao i za DOMMatrix crash, NIJE moguće
+    lokalno reproducirati originalni worker crash** (Windows `next
+    build`+`next start` nikad nije pucao ni za jedan od ova dva crasha,
+    razlog te razlike između Windows i Vercelovog Linux runtimea nikad
+    nije utvrđen ni za jedan slučaj) - čeka stvaran test u produkciji.
+    Ako i OVAJ fix ne bude dovoljan, sljedeći korak je opcija (b) iz
+    prijašnjeg zaključka - zamjena za `unpdf` ili sličnu biblioteku
+    dizajniranu specifično za serverless okruženja bez canvas/worker
+    ovisnosti.
 
 ---
 

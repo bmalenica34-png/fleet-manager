@@ -61,8 +61,42 @@ function ensurePdfjsNodePolyfills(): void {
   }
 }
 
+// pdfjs-dist (u Node okruženju bez pravog Worker konteksta) samostalno
+// pokušava "fake worker" - dinamički `import(this.workerSrc)` GDJE JE
+// `workerSrc` runtime IZRAČUNATA vrijednost (varijabla), ne statički
+// string literal. Next-ov file tracer (@vercel/nft) prati SAMO statičke
+// import specifiere - dinamički import s izračunatom putanjom je za njega
+// nevidljiv, pa `pdf.worker.mjs` (2MB, stvarno potreban fajl) nikad nije
+// uključen u Vercel serverless bundle. Potvrđeno stvarnim produkcijskim
+// padom (bug #45 dodatak, vidi PROGRESS.md): DOMMatrix fix je riješio
+// PRVI crash, ali odmah nakon njega isti poziv pukne na `Error: Setting
+// up fake worker failed: "Cannot find module '.../pdf.worker.mjs'"`.
+//
+// Rješenje koristi pdfjs-dist-ov SLUŽBENI izlaz za točno ovaj slučaj: ako
+// je `globalThis.pdfjsWorker.WorkerMessageHandler` već postavljen,
+// pdfjs-dist preskače dinamički import u potpunosti i koristi njega
+// izravno (vidi `PDFWorker.#mainThreadWorkerMessageHandler` u
+// `pdfjs-dist/legacy/build/pdf.mjs`). Naš `import("pdfjs-dist/legacy/
+// build/pdf.worker.mjs")` OVDJE je i dalje dinamički (zadržava odgodu iz
+// buga #43 - ne izvršava se dok se ova funkcija stvarno ne pozove), ali
+// specifier je statički STRING LITERAL, pa GA Next-ov tracer MOŽE pratiti
+// i uključiti u bundle - razlika je isključivo u tome je li putanja
+// literal ili varijabla, ne u tome je li import statički ili dinamički.
+let workerGlobalReady: Promise<void> | null = null;
+async function ensurePdfjsWorkerGlobal(): Promise<void> {
+  const target = globalThis as { pdfjsWorker?: unknown };
+  if (target.pdfjsWorker) return;
+  if (!workerGlobalReady) {
+    workerGlobalReady = import("pdfjs-dist/legacy/build/pdf.worker.mjs").then((mod) => {
+      target.pdfjsWorker = { WorkerMessageHandler: mod.WorkerMessageHandler };
+    });
+  }
+  await workerGlobalReady;
+}
+
 export async function extractPdfText(buffer: Buffer): Promise<string> {
   ensurePdfjsNodePolyfills();
+  await ensurePdfjsWorkerGlobal();
   const { PDFParse } = await import("pdf-parse");
   const parser = new PDFParse({ data: buffer });
   try {
