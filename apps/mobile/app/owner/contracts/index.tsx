@@ -1,8 +1,8 @@
 import { useCallback, useState } from "react";
-import { ActivityIndicator, FlatList, Pressable, StyleSheet, Text, View } from "react-native";
+import { ActivityIndicator, Alert, FlatList, Pressable, StyleSheet, Text, View } from "react-native";
 import { useFocusEffect, useRouter } from "expo-router";
 import { formatDateHr } from "@rent-a-car/api";
-import { listContracts, requestContractPhotos, type ContractListItem } from "../../../src/lib/api";
+import { closeContract, listContracts, requestContractPhotos, type ContractListItem } from "../../../src/lib/api";
 
 function formatDate(value: string): string {
   return formatDateHr(value);
@@ -10,7 +10,12 @@ function formatDate(value: string): string {
 
 function isActive(c: ContractListItem): boolean {
   const now = new Date();
-  return c.status === "signed" && new Date(c.dateFrom) <= now && new Date(c.dateTo) >= now;
+  return (
+    c.status === "signed" &&
+    new Date(c.dateFrom) <= now &&
+    new Date(c.dateTo) >= now &&
+    !c.closedAt
+  );
 }
 
 export default function ContractsScreen() {
@@ -19,6 +24,7 @@ export default function ContractsScreen() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [requestingId, setRequestingId] = useState<string | null>(null);
+  const [closingId, setClosingId] = useState<string | null>(null);
 
   const load = useCallback(() => {
     setError(null);
@@ -38,6 +44,29 @@ export default function ContractsScreen() {
     } finally {
       setRequestingId(null);
     }
+  }
+
+  function handleCloseContract(id: string, number: number) {
+    Alert.alert(
+      "Zatvoriti ugovor?",
+      `Ugovor br. ${number} bit će prijevremeno zatvoren. Vozilo odmah postaje slobodno.`,
+      [
+        { text: "Odustani", style: "cancel" },
+        {
+          text: "Zatvori",
+          style: "destructive",
+          onPress: async () => {
+            setClosingId(id);
+            try {
+              await closeContract(id);
+              load();
+            } finally {
+              setClosingId(null);
+            }
+          },
+        },
+      ]
+    );
   }
 
   return (
@@ -107,6 +136,20 @@ export default function ContractsScreen() {
                     Slike primljene {formatDate(item.latestPhotoRequest.fulfilledAt)}
                   </Text>
                 ) : null}
+
+                {item.closedAt ? (
+                  <Text style={styles.rowMuted}>Zatvoren {formatDate(item.closedAt)}</Text>
+                ) : isActive(item) ? (
+                  <Pressable
+                    style={styles.closeButton}
+                    onPress={() => handleCloseContract(item.id, item.number)}
+                    disabled={closingId === item.id}
+                  >
+                    <Text style={styles.closeButtonText}>
+                      {closingId === item.id ? "Zatvaranje..." : "Zatvori ugovor"}
+                    </Text>
+                  </Pressable>
+                ) : null}
               </View>
             );
           }}
@@ -145,4 +188,15 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
   },
   photoButtonText: { color: "#fff", fontWeight: "600", fontSize: 13 },
+  closeButton: {
+    borderWidth: 1,
+    borderColor: "#111",
+    padding: 10,
+    borderRadius: 8,
+    alignItems: "center",
+    marginTop: 6,
+    alignSelf: "flex-start",
+    paddingHorizontal: 16,
+  },
+  closeButtonText: { color: "#111", fontWeight: "600", fontSize: 13 },
 });

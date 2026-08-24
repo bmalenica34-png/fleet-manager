@@ -2,11 +2,26 @@ import { useCallback, useEffect, useState } from "react";
 import { ActivityIndicator, FlatList, Pressable, StyleSheet, Text, View } from "react-native";
 import { useFocusEffect, useRouter } from "expo-router";
 import { formatDateHr } from "@rent-a-car/api";
-import { listVehicles, type VehicleDTO } from "../../../src/lib/api";
+import { listVehicles, type VehicleDTO, type VehicleStatus } from "../../../src/lib/api";
 
 function formatDate(value: string | null): string {
   if (!value) return "—";
   return formatDateHr(value);
+}
+
+const STATUS_BADGE: Record<VehicleStatus, { label: string; bg: string; fg: string }> = {
+  on_service: { label: "Na servisu", bg: "#f3f4f6", fg: "#374151" },
+  rented: { label: "Pod ugovorom", bg: "#eff6ff", fg: "#1d4ed8" },
+  available: { label: "Slobodno", bg: "#f0fdf4", fg: "#166534" },
+};
+
+function StatusBadge({ status }: { status: VehicleStatus }) {
+  const { label, bg, fg } = STATUS_BADGE[status];
+  return (
+    <View style={[styles.badge, { backgroundColor: bg }]}>
+      <Text style={[styles.badgeText, { color: fg }]}>{label}</Text>
+    </View>
+  );
 }
 
 export default function VehiclesList() {
@@ -61,9 +76,12 @@ export default function VehiclesList() {
               style={styles.row}
               onPress={() => router.push({ pathname: "/owner/vehicles/[id]", params: { id: item.id } })}
             >
-              <Text style={styles.rowTitle}>
-                {item.make} {item.model}
-              </Text>
+              <View style={styles.rowTitleRow}>
+                <Text style={styles.rowTitle}>
+                  {item.make} {item.model}
+                </Text>
+                <StatusBadge status={item.status} />
+              </View>
               <Text style={styles.rowBody}>{item.licensePlate}</Text>
               <Text style={styles.rowMuted}>Registracija ističe: {formatDate(item.registrationExpiresAt)}</Text>
             </Pressable>
@@ -96,7 +114,10 @@ const styles = StyleSheet.create({
     padding: 14,
     gap: 4,
   },
+  rowTitleRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 8 },
   rowTitle: { fontSize: 16, fontWeight: "600" },
   rowBody: { fontSize: 14, color: "#444" },
   rowMuted: { fontSize: 13, color: "#888" },
+  badge: { borderRadius: 999, paddingVertical: 3, paddingHorizontal: 10 },
+  badgeText: { fontSize: 12, fontWeight: "600" },
 });

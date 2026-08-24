@@ -5,6 +5,21 @@ const API_BASE_URL = process.env.EXPO_PUBLIC_API_BASE_URL!;
 const DEFAULT_TIMEOUT_MS = 15000;
 const UPLOAD_TIMEOUT_MS = 30000;
 
+// Nosi HTTP status + parsirani JSON body greške (ne samo poruku) - potrebno
+// za slučajeve gdje UI treba strukturirane podatke iz error responsea, ne
+// samo tekst (npr. 409 vehicle_has_active_contract nosi cijeli postojeći
+// ugovor da UI može ponuditi izravan gumb za zatvaranje, isto kao web).
+export class ApiError extends Error {
+  constructor(
+    message: string,
+    public readonly status: number,
+    public readonly body: unknown
+  ) {
+    super(message);
+    this.name = "ApiError";
+  }
+}
+
 export async function apiFetch<T = unknown>(path: string, init: RequestInit = {}): Promise<T> {
   const {
     data: { session },
@@ -55,7 +70,7 @@ export async function apiFetch<T = unknown>(path: string, init: RequestInit = {}
         : typeof body?.error?.message === "string"
           ? body.error.message
           : `request_failed_${response.status}`;
-    throw new Error(message);
+    throw new ApiError(message, response.status, body);
   }
 
   return response.json();
@@ -78,6 +93,11 @@ export function requestMagicLink(role: MobileRole, email: string): Promise<{ ok:
 // VehicleDTO se namjerno NE importa iz "@rent-a-car/api/server" (Node-only,
 // nikad ne importati u mobile/client kod - vidi CLAUDE.md) - lokalna kopija
 // oblika je dovoljna, ovo je čisti DTO tip bez ikakve poslovne logike.
+// "on_service" nadjačava sve ostalo (Vehicle.underService), "rented"/
+// "available" se izvode iz postojanja tekućeg ugovora - isti computed status
+// koji web prikazuje, backend ga već računa (server/vehicles.ts).
+export type VehicleStatus = "on_service" | "rented" | "available";
+
 export interface VehicleDTO {
   id: string;
   make: string;
@@ -89,6 +109,8 @@ export interface VehicleDTO {
   registrationExpiresAt: string | null;
   insurancePolicyUrl: string | null;
   images: { id: string; url: string }[];
+  underService: boolean;
+  status: VehicleStatus;
   createdAt: string;
   updatedAt: string;
 }
@@ -124,6 +146,7 @@ export interface VehicleUpdateInput {
   licensePlate?: string;
   vin?: string;
   registrationExpiresAt?: string;
+  underService?: boolean;
 }
 
 export function updateVehicle(id: string, input: VehicleUpdateInput): Promise<VehicleDTO> {
@@ -314,6 +337,8 @@ export interface ContractListItem {
   status: string;
   dateFrom: string;
   dateTo: string;
+  closedAt: string | null;
+  actualEndDate: string | null;
   vehicle: { make: string; model: string; licensePlate: string };
   client: { firstName: string; lastName: string; email: string };
   contractPdfUrl: string | null;
@@ -324,6 +349,31 @@ export interface ContractListItem {
 
 export function listContracts(): Promise<ContractListItem[]> {
   return apiFetch("/api/contracts");
+}
+
+/**
+ * Prijevremeno zatvaranje aktivnog ugovora - isti POST /api/contracts/[id]/
+ * close endpoint koji owner-web koristi. Vraća ažuriran ugovor (closedAt/
+ * actualEndDate postavljeni).
+ */
+export function closeContract(id: string): Promise<ContractListItem> {
+  return apiFetch(`/api/contracts/${id}/close`, { method: "POST" });
+}
+
+export interface ActiveContractSummary {
+  id: string;
+  number: number;
+  dateTo: string;
+  client: { firstName: string; lastName: string };
+}
+
+/**
+ * Tekući (aktivni, nezatvoreni) ugovor za vozilo, ili null - isti
+ * GET /api/vehicles/[id]/active-contract endpoint koji web koristi za
+ * upozorenje/blokadu kod izdavanja duplog ugovora.
+ */
+export function getVehicleActiveContract(vehicleId: string): Promise<ActiveContractSummary | null> {
+  return apiFetch(`/api/vehicles/${vehicleId}/active-contract`);
 }
 
 export interface ContractCreateInput {
@@ -343,6 +393,17 @@ export function createContract(input: ContractCreateInput): Promise<ContractList
     method: "POST",
     body: JSON.stringify(input),
   });
+}
+
+/**
+ * Raspetlja 409 vehicle_has_active_contract grešku (POST /api/contracts) u
+ * strukturirani ActiveContractSummary, ili null ako je err bilo koja druga
+ * greška - isti response oblik koji web ruta vraća (server/contracts.ts).
+ */
+export function parseVehicleActiveContractConflict(err: unknown): ActiveContractSummary | null {
+  if (!(err instanceof ApiError) || err.status !== 409) return null;
+  const body = err.body as { error?: string; activeContract?: ActiveContractSummary } | null;
+  return body?.error === "vehicle_has_active_contract" && body.activeContract ? body.activeContract : null;
 }
 
 export function requestContractPhotos(contractId: string): Promise<unknown> {

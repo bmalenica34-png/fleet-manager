@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import {
   ActivityIndicator,
+  Alert,
   Image,
   KeyboardAvoidingView,
   Linking,
@@ -24,6 +25,7 @@ import {
   parseHrDateToIso,
 } from "@rent-a-car/api";
 import {
+  closeContract,
   deleteVehicleImage,
   getVehicle,
   listContracts,
@@ -37,6 +39,7 @@ import {
   type ContractListItem,
   type PickedFile,
   type VehicleDTO,
+  type VehicleStatus,
 } from "../../../src/lib/api";
 
 const CURRENT_YEAR = new Date().getFullYear();
@@ -51,6 +54,31 @@ const TABS: { id: VehicleTab; label: string }[] = [
   { id: "service", label: "Servis" },
   { id: "contracts", label: "Ugovori" },
 ];
+
+const STATUS_BADGE: Record<VehicleStatus, { label: string; bg: string; fg: string }> = {
+  on_service: { label: "Na servisu", bg: "#f3f4f6", fg: "#374151" },
+  rented: { label: "Pod ugovorom", bg: "#eff6ff", fg: "#1d4ed8" },
+  available: { label: "Slobodno", bg: "#f0fdf4", fg: "#166534" },
+};
+
+function StatusBadge({ status }: { status: VehicleStatus }) {
+  const { label, bg, fg } = STATUS_BADGE[status];
+  return (
+    <View style={[styles.badge, { backgroundColor: bg }]}>
+      <Text style={[styles.badgeText, { color: fg }]}>{label}</Text>
+    </View>
+  );
+}
+
+function isContractActive(c: ContractListItem): boolean {
+  const now = new Date();
+  return (
+    c.status === "signed" &&
+    new Date(c.dateFrom) <= now &&
+    new Date(c.dateTo) >= now &&
+    !c.closedAt
+  );
+}
 
 export default function VehicleDetail() {
   const router = useRouter();
@@ -100,6 +128,10 @@ export default function VehicleDetail() {
   const [activeTab, setActiveTab] = useState<VehicleTab>("info");
   const [contracts, setContracts] = useState<ContractListItem[]>([]);
   const [contractsLoading, setContractsLoading] = useState(true);
+  const [togglingService, setTogglingService] = useState(false);
+  const [serviceToggleError, setServiceToggleError] = useState<string | null>(null);
+  const [closingContractId, setClosingContractId] = useState<string | null>(null);
+  const [closeContractError, setCloseContractError] = useState<string | null>(null);
 
   const load = useCallback(() => {
     setError(null);
@@ -136,14 +168,59 @@ export default function VehicleDetail() {
     load();
   }, [load]);
 
-  useEffect(() => {
+  const loadContracts = useCallback(() => {
     listContracts()
       .then(setContracts)
       .catch(() => setContracts([]))
       .finally(() => setContractsLoading(false));
   }, []);
 
+  useEffect(() => {
+    loadContracts();
+  }, [loadContracts]);
+
   const vehicleContracts = contracts.filter((c) => c.vehicleId === id);
+
+  async function handleToggleUnderService() {
+    if (!vehicle) return;
+    setServiceToggleError(null);
+    setTogglingService(true);
+    try {
+      const updated = await updateVehicle(id, { underService: !vehicle.underService });
+      setVehicle(updated);
+    } catch (err) {
+      setServiceToggleError(err instanceof Error ? err.message : "Greška prilikom spremanja");
+    } finally {
+      setTogglingService(false);
+    }
+  }
+
+  function handleCloseContract(contract: ContractListItem) {
+    Alert.alert(
+      "Zatvoriti ugovor?",
+      `Ugovor br. ${contract.number} bit će prijevremeno zatvoren. Vozilo odmah postaje slobodno.`,
+      [
+        { text: "Odustani", style: "cancel" },
+        {
+          text: "Zatvori",
+          style: "destructive",
+          onPress: async () => {
+            setCloseContractError(null);
+            setClosingContractId(contract.id);
+            try {
+              await closeContract(contract.id);
+              loadContracts();
+              load();
+            } catch (err) {
+              setCloseContractError(err instanceof Error ? err.message : "Greška prilikom zatvaranja ugovora");
+            } finally {
+              setClosingContractId(null);
+            }
+          },
+        },
+      ]
+    );
+  }
 
   const isCustomMake = make === OTHER_VEHICLE_OPTION;
   const isCustomModel = isCustomMake || model === OTHER_VEHICLE_OPTION;
@@ -433,6 +510,23 @@ export default function VehicleDetail() {
         <Text style={styles.title}>
           {vehicle.make} {vehicle.model}
         </Text>
+        <View style={styles.statusRow}>
+          <StatusBadge status={vehicle.status} />
+          <Pressable
+            style={[styles.buttonSecondary, togglingService && styles.buttonDisabled]}
+            onPress={handleToggleUnderService}
+            disabled={togglingService}
+          >
+            <Text style={styles.buttonSecondaryText}>
+              {togglingService
+                ? "Spremanje..."
+                : vehicle.underService
+                  ? "Vrati u pogon"
+                  : "Označi na servisu"}
+            </Text>
+          </Pressable>
+        </View>
+        {serviceToggleError && <Text style={styles.error}>{serviceToggleError}</Text>}
       </View>
 
       <View style={styles.tabBar}>
@@ -710,6 +804,7 @@ export default function VehicleDetail() {
 
       {activeTab === "contracts" && (
         <View style={styles.section}>
+          {closeContractError && <Text style={styles.error}>{closeContractError}</Text>}
           {contractsLoading ? (
             <ActivityIndicator />
           ) : vehicleContracts.length === 0 ? (
@@ -724,12 +819,26 @@ export default function VehicleDetail() {
                   <Text style={styles.muted}>
                     {c.client.firstName} {c.client.lastName}
                   </Text>
+                  {c.closedAt && (
+                    <Text style={styles.muted}>Zatvoren {formatDateHr(c.closedAt)}</Text>
+                  )}
                   {c.contractPdfUrl ? (
                     <Pressable onPress={() => Linking.openURL(c.contractPdfUrl!)}>
                       <Text style={styles.link}>Preuzmi PDF</Text>
                     </Pressable>
                   ) : (
                     <Text style={styles.muted}>Dokument još nije generiran.</Text>
+                  )}
+                  {isContractActive(c) && (
+                    <Pressable
+                      style={[styles.buttonSecondary, closingContractId === c.id && styles.buttonDisabled]}
+                      onPress={() => handleCloseContract(c)}
+                      disabled={closingContractId === c.id}
+                    >
+                      <Text style={styles.buttonSecondaryText}>
+                        {closingContractId === c.id ? "Zatvaranje..." : "Zatvori ugovor prijevremeno"}
+                      </Text>
+                    </Pressable>
                   )}
                 </View>
               ))}
@@ -770,6 +879,9 @@ const styles = StyleSheet.create({
   header: { gap: 4 },
   backLink: { color: "#444" },
   title: { fontSize: 22, fontWeight: "600" },
+  statusRow: { flexDirection: "row", alignItems: "center", gap: 10, marginTop: 4 },
+  badge: { borderRadius: 999, paddingVertical: 3, paddingHorizontal: 10 },
+  badgeText: { fontSize: 12, fontWeight: "600" },
   section: { gap: 10, borderTopWidth: 1, borderTopColor: "#eee", paddingTop: 16 },
   sectionTitle: { fontSize: 17, fontWeight: "600" },
   field: { gap: 4 },

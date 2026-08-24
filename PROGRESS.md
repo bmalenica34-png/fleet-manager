@@ -4,7 +4,92 @@ Dinamički log stanja projekta. Ažurira se na kraju svake sesije. Za statičnu
 arhitekturu/konvencije vidi [CLAUDE.md](CLAUDE.md) — ovaj dokument je "što je
 gotovo i zašto", ne "kako treba izgledati".
 
-**Zadnje ažurirano:** 2026-08-24, dvadesetčetvrti nastavak - korisnik zatražio
+**Zadnje ažurirano:** 2026-08-24, dvadesetpeti nastavak - korisnik zatražio
+prebacivanje prošlog nastavka (status vozila/prijevremeno zatvaranje/blokada
+duplog ugovora) na owner-mobile (Expo). Čisto UI zadatak - backend je već
+dijeljen kroz `@rent-a-car/api`, isti API pozivi kao web.
+
+**1) `src/lib/api.ts` - popravljen zaostatak u ručno kopiranim DTO tipovima.**
+Mobile NE importa `VehicleDTO`/`ContractListItem` iz `@rent-a-car/api/server`
+(Node-only, vidi CLAUDE.md) - lokalne kopije oblika su drift-ale od
+prijašnjeg nastavka. `VehicleDTO` dobio `underService`/`status`
+(`VehicleStatus = "on_service" | "rented" | "available"`), `ContractListItem`
+dobio `closedAt`/`actualEndDate`, `VehicleUpdateInput` dobio `underService?`.
+
+**Nova `ApiError` klasa** (proširuje `Error`, nosi `status`+`body`) -
+`apiFetch` je prije bacao goli `Error` s samo porukom, gubeći strukturirane
+podatke iz JSON error bodyja. Potrebno za 409 `vehicle_has_active_contract`
+response (nosi cijeli postojeći ugovor) - bez ovoga UI ne bi mogao ponuditi
+izravan gumb za zatvaranje, samo generičku poruku. Backward-kompatibilno
+(`err.message` i dalje radi identično za sve postojeće `catch` blokove).
+
+**Nove funkcije:** `closeContract(id)` (POST `/api/contracts/[id]/close`,
+isti endpoint kao web), `getVehicleActiveContract(vehicleId)` (GET
+`/api/vehicles/[id]/active-contract`), `parseVehicleActiveContractConflict(err)`
+(raspetlja 409 iz `createContract` u `ActiveContractSummary | null`, koristi
+`ApiError` iznad).
+
+**2) Status vozila.** `StatusBadge` komponenta (lokalna po ekranu, isti
+obrazac kao web - nema zajedničkog components foldera u mobileu, ne uveden
+jedan samo za ovo) na `owner/vehicles/index.tsx` (lista, badge pored naslova
+retka) i `owner/vehicles/[id].tsx` (detalj, badge + gumb "Označi na servisu"/
+"Vrati u pogon" pored naslova - `updateVehicle(id, {underService})`, reuse
+postojeće rute).
+
+**3) Prijevremeno zatvaranje.** Gumb na OBA mjesta (isto kao web): (a)
+`owner/contracts/index.tsx` - `isActive()` helper proširen `!c.closedAt`
+provjerom (isti propust koji je web imao prije prošlog nastavka - "Zatraži
+slike" gumb bi se pogrešno prikazivao i za zatvorene ugovore unutar
+originalnog `dateTo` raspona), nova "Zatvori ugovor" akcija + "Zatvoren
+{datum}" prikaz nakon; (b) `owner/vehicles/[id].tsx` "Ugovori" tab - isti
+`isContractActive` helper, gumb po kartici ugovora. Native `Alert.alert`
+potvrda prije zatvaranja (RN nema `window.confirm` - isti UX namjera kao
+web, gdje se `confirm()` koristio). Zatvaranje refresha i listu ugovora i
+vozilo (`load()` + `loadContracts()`) da se status na vrhu odmah promijeni.
+
+**4) Blokada duplog ugovora.** `owner/contracts/new.tsx`: `useEffect` na
+promjenu `vehicleId` poziva `getVehicleActiveContract`, prikazuje amber
+upozorenje (broj ugovora, klijent, datum do) s gumbom "Zatvori postojeći
+ugovor" - identičan flow kao web. `canSubmit` dodatno zahtijeva
+`!vehicleActiveContract`. Submit handler hvata 409 preko
+`parseVehicleActiveContractConflict` kao safety net (isto kao web-ov 409
+handler).
+
+**Uhvaćena i ispravljena vlastita greška prije verifikacije:** prva verzija
+`owner/vehicles/[id].tsx` je greškom vezala nove akcije (toggle servisa,
+zatvaranje ugovora) na POSTOJEĆI page-level `error` state, koji ekran
+koristi za `if (error || !vehicle) return <cijeli ekran samo s porukom>` -
+neuspio toggle/close bi time zamijenio CIJELI detalj vozila (sve tabove,
+podatke) golom porukom o grešci umjesto inline poruke pored gumba. Uočeno
+review-om prije verifikacije (nema fizičkog uređaja za live test, vidi
+niže), popravljeno odvojenim `serviceToggleError`/`closeContractError`
+state-ovima, isti obrazac kao postojeći `docError`/`imagesError`/`infoError`
+već u tom fajlu.
+
+**Namjerno NE probano:** instalacija `react-native-web` radi Expo web
+smoke-testa u Browser paneu - projekt ga nema (`expo start --web` odmah puca
+s "missing react-native-web") i dodavanje samo radi mog testiranja bilo bi
+nepotrebna, stvarna promjena ovisnosti izvan traženog scopea (mobile je
+Expo, ne web app - vidi CLAUDE.md). `.claude/launch.json` je kratko dobio
+pokusni `mobile-web` config za ovaj pokušaj, vraćen na izvorno stanje odmah
+nakon što je pao (`git status` potvrđuje da launch.json nema diff).
+
+**Verifikacija.** `tsc --noEmit` čist na sva tri paketa (nakon što je
+`apps/web/.next` cache očišćen - referencirao je uklonjenu debug rutu iz
+prošlog nastavka, netočna greška nepovezana sa stvarnim kodom). **Nije
+testirano na fizičkom uređaju/simulatoru** - eksplicitno traženo u
+zahtjevu, ali ovo okruženje nema spojen Android/iOS simulator ni Expo Go
+uređaj, i Expo web target nije postavljen u projektu (vidi gore) - korisnik
+treba sam pokrenuti `pnpm --filter @rent-a-car/mobile start` i skenirati QR
+kod / pokrenuti simulator lokalno da potvrdi vizualno ponašanje prije nego
+se smatra potpuno gotovim. Kod prati 1:1 već verificirani web referentni
+flow (isti API pozivi, ista `findCurrentContractForVehicle`/
+`closeContractEarly` backend logika testirana u prošlom nastavku) i
+typecheck je čist, ali to NIJE isto što i potvrđen UI na uređaju.
+
+---
+
+**Prijašnji dio (dvadesetčetvrti nastavak)** - korisnik zatražio
 status vozila (pod ugovorom/slobodno/na servisu), prijevremeno zatvaranje
 ugovora, i blokadu duplog ugovora za isto vozilo. Sva tri dijela dijele ISTI
 izvor istine za "vozilo ima tekući ugovor" - namjerno, da definicija ostane

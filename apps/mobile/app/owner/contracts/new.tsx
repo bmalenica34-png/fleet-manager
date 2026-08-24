@@ -13,9 +13,13 @@ import {
 import { useRouter } from "expo-router";
 import { formatDateHr, parseHrDateToIso } from "@rent-a-car/api";
 import {
+  closeContract,
   createContract,
+  getVehicleActiveContract,
   listClients,
   listVehicles,
+  parseVehicleActiveContractConflict,
+  type ActiveContractSummary,
   type ClientRecord,
   type VehicleDTO,
 } from "../../../src/lib/api";
@@ -48,6 +52,10 @@ export default function NewContractScreen() {
   const [vehicleId, setVehicleId] = useState<string | null>(null);
   const [clientId, setClientId] = useState<string | null>(null);
 
+  const [vehicleActiveContract, setVehicleActiveContract] = useState<ActiveContractSummary | null>(null);
+  const [checkingActiveContract, setCheckingActiveContract] = useState(false);
+  const [closingActiveContract, setClosingActiveContract] = useState(false);
+
   const [dateFromMode, setDateFromMode] = useState<DateFromMode>("today");
   const [dateFrom, setDateFrom] = useState(todayIso());
   const [customDateFrom, setCustomDateFrom] = useState("");
@@ -72,6 +80,39 @@ export default function NewContractScreen() {
       .finally(() => setLoading(false));
   }, []);
 
+  useEffect(() => {
+    if (!vehicleId) {
+      setVehicleActiveContract(null);
+      return;
+    }
+    let cancelled = false;
+    setCheckingActiveContract(true);
+    getVehicleActiveContract(vehicleId)
+      .then((contract) => {
+        if (!cancelled) setVehicleActiveContract(contract);
+      })
+      .catch(() => {
+        if (!cancelled) setVehicleActiveContract(null);
+      })
+      .finally(() => {
+        if (!cancelled) setCheckingActiveContract(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [vehicleId]);
+
+  async function handleCloseActiveContract() {
+    if (!vehicleActiveContract) return;
+    setClosingActiveContract(true);
+    try {
+      await closeContract(vehicleActiveContract.id);
+      setVehicleActiveContract(null);
+    } finally {
+      setClosingActiveContract(false);
+    }
+  }
+
   function selectDateFromMode(mode: DateFromMode) {
     setDateFromMode(mode);
     if (mode === "today") setDateFrom(todayIso());
@@ -91,7 +132,9 @@ export default function NewContractScreen() {
   const dayCount = Number(days);
   const dateTo = dateFrom && dayCount > 0 ? addDaysIso(dateFrom, dayCount) : null;
   const pricePerDayValid = Number(pricePerDay) > 0;
-  const canSubmit = Boolean(vehicleId && clientId && dateFrom && dateTo && pricePerDayValid);
+  const canSubmit = Boolean(
+    vehicleId && clientId && dateFrom && dateTo && pricePerDayValid && !vehicleActiveContract
+  );
 
   async function handleSubmit() {
     if (!vehicleId || !clientId || !dateFrom || !dateTo || !pricePerDayValid) return;
@@ -111,7 +154,13 @@ export default function NewContractScreen() {
       });
       router.replace("/owner/contracts");
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Greška prilikom kreiranja ugovora. Provjeri datume i odabir.");
+      const conflict = parseVehicleActiveContractConflict(err);
+      if (conflict) {
+        setVehicleActiveContract(conflict);
+        setError("Ovo vozilo već ima tekući ugovor - zatvori ga prije nastavka.");
+      } else {
+        setError(err instanceof Error ? err.message : "Greška prilikom kreiranja ugovora. Provjeri datume i odabir.");
+      }
     } finally {
       setSubmitting(false);
     }
@@ -156,6 +205,28 @@ export default function NewContractScreen() {
                   </Text>
                 </Pressable>
               ))}
+            </View>
+          )}
+
+          {checkingActiveContract && <Text style={styles.muted}>Provjera dostupnosti vozila...</Text>}
+
+          {vehicleActiveContract && (
+            <View style={styles.warningBox}>
+              <Text style={styles.warningText}>
+                ⚠️ Ovo vozilo već ima tekući ugovor br. {vehicleActiveContract.number} (
+                {vehicleActiveContract.client.firstName} {vehicleActiveContract.client.lastName}, do{" "}
+                {formatDateHr(vehicleActiveContract.dateTo)}). Izdavanje novog ugovora nije moguće dok se
+                postojeći ne zatvori.
+              </Text>
+              <Pressable
+                style={[styles.buttonSecondary, closingActiveContract && styles.buttonDisabled]}
+                onPress={handleCloseActiveContract}
+                disabled={closingActiveContract}
+              >
+                <Text style={styles.buttonSecondaryText}>
+                  {closingActiveContract ? "Zatvaranje..." : "Zatvori postojeći ugovor"}
+                </Text>
+              </Pressable>
             </View>
           )}
         </View>
@@ -312,4 +383,21 @@ const styles = StyleSheet.create({
   button: { backgroundColor: "#111", padding: 14, borderRadius: 8, alignItems: "center" },
   buttonDisabled: { opacity: 0.5 },
   buttonText: { color: "#fff", fontWeight: "600" },
+  buttonSecondary: {
+    borderWidth: 1,
+    borderColor: "#111",
+    padding: 12,
+    borderRadius: 8,
+    alignItems: "center",
+  },
+  buttonSecondaryText: { color: "#111", fontWeight: "600" },
+  warningBox: {
+    borderWidth: 1,
+    borderColor: "#d97706",
+    borderRadius: 8,
+    padding: 12,
+    backgroundColor: "#fffbeb",
+    gap: 10,
+  },
+  warningText: { color: "#92400e", fontSize: 13, lineHeight: 18 },
 });
