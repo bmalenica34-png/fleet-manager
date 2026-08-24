@@ -38,13 +38,16 @@ pokazuje ništa sumnjivo.
 
 **Ovo NIJE nešto što se može popraviti commitom/pushom** - Root
 Directory i Framework Preset su Vercel dashboard/CLI projekt-postavke,
-izvan gita. **Korisnik treba odlučiti**: (a) popraviti postavke tog
-projekta da se poklapaju s `fleet-manager-web` (Root Directory→`apps/web`,
-Framework→Next.js) ako ima namjenu (npr. drugi environment/staging), ili
-(b) obrisati ga kao vjerojatno slučajni duplikat projekta bez ikad
-uspješnog deploya. Claude nije poduzeo nijednu od te dvije akcije
-jednostrano - obje su nepovratne/utječu na dijeljeni Vercel account izvan
-lokalnog repoa, zahtijevaju eksplicitnu korisnikovu potvrdu.
+izvan gita. Claude nije poduzeo nijednu popravku jednostrano (obje
+opcije - popraviti postavke ili obrisati - nepovratne su/utječu na
+dijeljeni Vercel account izvan lokalnog repoa), nego pitao korisnika.
+**Korisnik odabrao: obrisati.** `vercel project rm fleet-manager`
+(potvrđeno preko `echo "y" | ...` jer `--non-interactive` flag sam po
+sebi nije preskočio potvrdni prompt u ovoj CLI verziji), potvrđeno
+`vercel project ls` - `fleet-manager` više ne postoji, samo
+`fleet-manager-web` ostaje spojen na ovaj repo. Problem time potpuno
+zatvoren - više nema drugog projekta koji bi mogao zbuniti buduće
+provjere dashboarda.
 
 **Polica osiguranja NIJE nedostajala zbog koda** - `fleet-manager-web`
 (radni projekt) je potvrđeno ažuriran (deployment timestamp se poklapa
