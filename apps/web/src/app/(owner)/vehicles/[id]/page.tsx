@@ -21,8 +21,34 @@ interface VehicleContractItem {
   status: string;
   dateFrom: string;
   dateTo: string;
+  closedAt: string | null;
+  actualEndDate: string | null;
   client: { firstName: string; lastName: string };
   contractPdfUrl: string | null;
+}
+
+const STATUS_BADGE: Record<VehicleDTO["status"], { label: string; bg: string; fg: string }> = {
+  on_service: { label: "Na servisu", bg: "#f3f4f6", fg: "#374151" },
+  rented: { label: "Pod ugovorom", bg: "#eff6ff", fg: "#1d4ed8" },
+  available: { label: "Slobodno", bg: "#f0fdf4", fg: "#166534" },
+};
+
+function StatusBadge({ status }: { status: VehicleDTO["status"] }) {
+  const { label, bg, fg } = STATUS_BADGE[status];
+  return (
+    <span
+      style={{
+        display: "inline-block",
+        padding: "0.15rem 0.55rem",
+        borderRadius: "999px",
+        fontSize: "0.8rem",
+        background: bg,
+        color: fg,
+      }}
+    >
+      {label}
+    </span>
+  );
 }
 
 type VehicleTab = "info" | "documents" | "images" | "service" | "contracts";
@@ -49,6 +75,8 @@ export default function VehicleDetailPage() {
   const [contractsLoading, setContractsLoading] = useState(true);
   const [historyFrom, setHistoryFrom] = useState("");
   const [historyTo, setHistoryTo] = useState("");
+  const [closingContract, setClosingContract] = useState(false);
+  const [togglingService, setTogglingService] = useState(false);
 
   const [make, setMake] = useState("");
   const [customMake, setCustomMake] = useState("");
@@ -128,8 +156,37 @@ export default function VehicleDetailPage() {
   // povijesti u "Ugovori" tabu.
   const now = new Date();
   const activeContract = vehicleContracts.find(
-    (c) => c.status === "signed" && new Date(c.dateFrom) <= now && new Date(c.dateTo) >= now
+    (c) =>
+      c.status === "signed" &&
+      new Date(c.dateFrom) <= now &&
+      new Date(c.dateTo) >= now &&
+      !c.closedAt
   );
+
+  async function handleCloseActiveContract() {
+    if (!activeContract) return;
+    if (!confirm(`Zatvoriti ugovor br. ${activeContract.number} prijevremeno? Vozilo odmah postaje slobodno.`))
+      return;
+    setClosingContract(true);
+    await fetch(`/api/contracts/${activeContract.id}/close`, { method: "POST" });
+    setClosingContract(false);
+    load();
+    fetch("/api/contracts")
+      .then((res) => res.json())
+      .then(setContracts);
+  }
+
+  async function handleToggleUnderService() {
+    if (!vehicle) return;
+    setTogglingService(true);
+    await fetch(`/api/vehicles/${vehicleId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ underService: !vehicle.underService }),
+    });
+    setTogglingService(false);
+    load();
+  }
 
   // Povijest, najnovije prvo (po dateFrom) + opcionalan date-range filter
   // (od/do) - filtrira po preklapanju razdoblja najma s odabranim rasponom,
@@ -503,9 +560,24 @@ export default function VehicleDetailPage() {
 
   return (
     <div>
-      <h1>
-        {vehicle.make} {vehicle.model}
-      </h1>
+      <div style={{ display: "flex", alignItems: "center", gap: "0.75rem", flexWrap: "wrap" }}>
+        <h1 style={{ margin: 0 }}>
+          {vehicle.make} {vehicle.model}
+        </h1>
+        <StatusBadge status={vehicle.status} />
+        <button
+          type="button"
+          className="btn"
+          onClick={handleToggleUnderService}
+          disabled={togglingService}
+        >
+          {togglingService
+            ? "Spremanje..."
+            : vehicle.underService
+              ? "Vrati u pogon"
+              : "Označi na servisu"}
+        </button>
+      </div>
 
       {vehicle.hasIncompleteData && (
         <div
@@ -546,6 +618,11 @@ export default function VehicleDetailPage() {
               )
             </>
           )}
+          <div style={{ marginTop: "0.5rem" }}>
+            <button className="btn" onClick={handleCloseActiveContract} disabled={closingContract}>
+              {closingContract ? "Zatvaranje..." : "Zatvori ugovor prijevremeno"}
+            </button>
+          </div>
         </div>
       )}
 
@@ -850,7 +927,12 @@ export default function VehicleDetailPage() {
                     <td>{c.number}</td>
                     <td>{formatDateHr(c.dateFrom)}</td>
                     <td>{formatDateHr(c.dateTo)}</td>
-                    <td>{c.status}</td>
+                    <td>
+                      {c.status}
+                      {c.closedAt && (
+                        <span className="muted"> (zatvoren {formatDateHr(c.closedAt)})</span>
+                      )}
+                    </td>
                     <td>
                       {c.client.firstName} {c.client.lastName}
                     </td>

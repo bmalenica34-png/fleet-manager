@@ -10,6 +10,8 @@ interface ContractListItem {
   status: string;
   dateFrom: string;
   dateTo: string;
+  closedAt: string | null;
+  actualEndDate: string | null;
   vehicle: { make: string; model: string; licensePlate: string };
   client: { firstName: string; lastName: string; email: string };
   contractPdfUrl: string | null;
@@ -21,13 +23,19 @@ interface ContractListItem {
 
 function isActive(c: ContractListItem): boolean {
   const now = new Date();
-  return c.status === "signed" && new Date(c.dateFrom) <= now && new Date(c.dateTo) >= now;
+  return (
+    c.status === "signed" &&
+    new Date(c.dateFrom) <= now &&
+    new Date(c.dateTo) >= now &&
+    !c.closedAt
+  );
 }
 
 export default function ContractsPage() {
   const [contracts, setContracts] = useState<ContractListItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [requestingId, setRequestingId] = useState<string | null>(null);
+  const [closingId, setClosingId] = useState<string | null>(null);
 
   function load() {
     setLoading(true);
@@ -47,6 +55,14 @@ export default function ContractsPage() {
     setRequestingId(id);
     await fetch(`/api/contracts/${id}/photo-requests`, { method: "POST" });
     setRequestingId(null);
+    load();
+  }
+
+  async function handleCloseContract(id: string, number: number) {
+    if (!confirm(`Zatvoriti ugovor br. ${number} prijevremeno? Vozilo odmah postaje slobodno.`)) return;
+    setClosingId(id);
+    await fetch(`/api/contracts/${id}/close`, { method: "POST" });
+    setClosingId(null);
     load();
   }
 
@@ -76,6 +92,7 @@ export default function ContractsPage() {
               <th>Produženje</th>
               <th>Dokumenti</th>
               <th>Slike</th>
+              <th>Zatvaranje</th>
             </tr>
           </thead>
           <tbody>
@@ -146,6 +163,21 @@ export default function ContractsPage() {
                       <span className="muted">
                         Primljeno {formatDateHr(c.latestPhotoRequest.fulfilledAt)}
                       </span>
+                    ) : (
+                      <span className="muted">—</span>
+                    )}
+                  </td>
+                  <td>
+                    {c.closedAt ? (
+                      <span className="muted">Zatvoren {formatDateHr(c.closedAt)}</span>
+                    ) : isActive(c) ? (
+                      <button
+                        className="btn"
+                        onClick={() => handleCloseContract(c.id, c.number)}
+                        disabled={closingId === c.id}
+                      >
+                        {closingId === c.id ? "Zatvaranje..." : "Zatvori ugovor"}
+                      </button>
                     ) : (
                       <span className="muted">—</span>
                     )}

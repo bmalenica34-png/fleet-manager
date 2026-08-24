@@ -1,6 +1,10 @@
 import { NextResponse } from "next/server";
 import { contractCreateSchema } from "@rent-a-car/api";
-import { createContractAndSendSigningEmail, listContractsWithDocumentUrls } from "@rent-a-car/api/server";
+import {
+  createContractAndSendSigningEmail,
+  listContractsWithDocumentUrls,
+  VehicleHasActiveContractError,
+} from "@rent-a-car/api/server";
 import { zodErrorResponse } from "@/lib/handleZodError";
 import { requireModulePermission, requireOwnerSession } from "@/lib/requireOwnerSession";
 
@@ -21,9 +25,30 @@ export async function POST(request: Request) {
   const parsed = contractCreateSchema.safeParse(body);
   if (!parsed.success) return zodErrorResponse(parsed.error);
 
-  const contract = await createContractAndSendSigningEmail(parsed.data, {
-    kind: auth.principal.kind,
-    id: auth.principal.id,
-  });
-  return NextResponse.json(contract, { status: 201 });
+  try {
+    const contract = await createContractAndSendSigningEmail(parsed.data, {
+      kind: auth.principal.kind,
+      id: auth.principal.id,
+    });
+    return NextResponse.json(contract, { status: 201 });
+  } catch (err) {
+    if (err instanceof VehicleHasActiveContractError) {
+      return NextResponse.json(
+        {
+          error: "vehicle_has_active_contract",
+          activeContract: {
+            id: err.contract.id,
+            number: err.contract.number,
+            dateTo: err.contract.dateTo,
+            client: {
+              firstName: err.contract.client.firstName,
+              lastName: err.contract.client.lastName,
+            },
+          },
+        },
+        { status: 409 }
+      );
+    }
+    throw err;
+  }
 }

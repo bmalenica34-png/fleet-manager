@@ -48,6 +48,11 @@ model Vehicle {
   // ako se reasons kasnije promijene.
   incompleteDataNotifiedAt DateTime?
 
+  // Ručni toggle ("na servisu") - vlasnik ga postavlja/miče izravno, NIJE
+  // izveden iz ugovora. Kad je true, nadjačava computed "pod ugovorom"/
+  // "slobodno" status posvuda u UI-u (vidi toVehicleDTO u server/vehicles.ts).
+  underService Boolean @default(false)
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -303,6 +308,15 @@ model Contract {
 
   contractPdfKey String?
   protocolPdfKey String?
+
+  // Prijevremeno zatvaranje - postavlja ih SAMO closeContractEarly()
+  // (server/contracts.ts), nikad se ne mijenjaju automatski. `dateTo` OSTAJE
+  // netaknut (originalno ugovoreni datum, povijesni podatak) - actualEndDate
+  // bilježi kad je najam STVARNO završio. Vozilo se računa "slobodno" čim je
+  // closedAt postavljen (vidi findCurrentContractForVehicle), neovisno o
+  // tome koliko je dateTo još daleko u budućnosti.
+  closedAt      DateTime?
+  actualEndDate DateTime?
 
   // Podaci za redizajnirani Contract PDF (dodano naknadno, nije bilo dio
   // izvornog v1 scope-a - sva polja nullable). Owner unosi pri kreiranju

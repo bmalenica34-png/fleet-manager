@@ -8,6 +8,13 @@ import { formatDateHr } from "@rent-a-car/api";
 
 type DateFromMode = "today" | "tomorrow" | "custom";
 
+interface ActiveContractSummary {
+  id: string;
+  number: number;
+  dateTo: string;
+  client: { firstName: string; lastName: string };
+}
+
 function todayIso(): string {
   return offsetIso(0);
 }
@@ -35,6 +42,38 @@ export default function NewContractPage() {
   const [vehicleId, setVehicleId] = useState("");
   const [clientId, setClientId] = useState("");
 
+  const [vehicleActiveContract, setVehicleActiveContract] = useState<ActiveContractSummary | null>(null);
+  const [checkingActiveContract, setCheckingActiveContract] = useState(false);
+  const [closingActiveContract, setClosingActiveContract] = useState(false);
+
+  useEffect(() => {
+    if (!vehicleId) {
+      setVehicleActiveContract(null);
+      return;
+    }
+    let cancelled = false;
+    setCheckingActiveContract(true);
+    fetch(`/api/vehicles/${vehicleId}/active-contract`)
+      .then((res) => res.json())
+      .then((data) => {
+        if (!cancelled) setVehicleActiveContract(data);
+      })
+      .finally(() => {
+        if (!cancelled) setCheckingActiveContract(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [vehicleId]);
+
+  async function handleCloseActiveContract() {
+    if (!vehicleActiveContract) return;
+    setClosingActiveContract(true);
+    await fetch(`/api/contracts/${vehicleActiveContract.id}/close`, { method: "POST" });
+    setClosingActiveContract(false);
+    setVehicleActiveContract(null);
+  }
+
   const [dateFromMode, setDateFromMode] = useState<DateFromMode>("today");
   const [dateFrom, setDateFrom] = useState(todayIso());
   const [days, setDays] = useState("7");
@@ -59,7 +98,9 @@ export default function NewContractPage() {
   const dayCount = Number(days);
   const dateTo = dateFrom && dayCount > 0 ? addDaysIso(dateFrom, dayCount) : null;
   const pricePerDayValid = Number(pricePerDay) > 0;
-  const canSubmit = Boolean(vehicleId && clientId && dateFrom && dateTo && pricePerDayValid);
+  const canSubmit = Boolean(
+    vehicleId && clientId && dateFrom && dateTo && pricePerDayValid && !vehicleActiveContract
+  );
 
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -92,6 +133,12 @@ export default function NewContractPage() {
     setSubmitting(false);
 
     if (!res.ok) {
+      if (res.status === 409) {
+        const body = await res.json().catch(() => null);
+        if (body?.error === "vehicle_has_active_contract") setVehicleActiveContract(body.activeContract);
+        setError("Ovo vozilo već ima tekući ugovor - zatvori ga prije nastavka.");
+        return;
+      }
       setError("Greška prilikom kreiranja ugovora. Provjeri datume i odabir.");
       return;
     }
@@ -116,6 +163,35 @@ export default function NewContractPage() {
             ))}
           </select>
         </label>
+
+        {checkingActiveContract && <p className="muted">Provjera dostupnosti vozila...</p>}
+
+        {vehicleActiveContract && (
+          <div
+            style={{
+              padding: "0.75rem 1rem",
+              border: "1px solid #d97706",
+              borderRadius: "6px",
+              background: "#fffbeb",
+              color: "#92400e",
+            }}
+          >
+            ⚠️ Ovo vozilo već ima tekući ugovor br. {vehicleActiveContract.number} (
+            {vehicleActiveContract.client.firstName} {vehicleActiveContract.client.lastName}, do{" "}
+            {formatDateHr(vehicleActiveContract.dateTo)}). Izdavanje novog ugovora nije moguće dok se
+            postojeći ne zatvori.
+            <div style={{ marginTop: "0.5rem" }}>
+              <button
+                type="button"
+                className="btn"
+                onClick={handleCloseActiveContract}
+                disabled={closingActiveContract}
+              >
+                {closingActiveContract ? "Zatvaranje..." : "Zatvori postojeći ugovor"}
+              </button>
+            </div>
+          </div>
+        )}
 
         <label>
           Klijent

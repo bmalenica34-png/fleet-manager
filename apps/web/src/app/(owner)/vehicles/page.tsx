@@ -6,6 +6,30 @@ import { formatDateHr } from "@rent-a-car/api";
 
 const CSV_HEADERS = ["marka", "model", "godina", "VIN", "registarska tablica", "istek registracije"];
 
+const STATUS_BADGE: Record<VehicleDTO["status"], { label: string; bg: string; fg: string }> = {
+  on_service: { label: "Na servisu", bg: "#f3f4f6", fg: "#374151" },
+  rented: { label: "Pod ugovorom", bg: "#eff6ff", fg: "#1d4ed8" },
+  available: { label: "Slobodno", bg: "#f0fdf4", fg: "#166534" },
+};
+
+function StatusBadge({ status }: { status: VehicleDTO["status"] }) {
+  const { label, bg, fg } = STATUS_BADGE[status];
+  return (
+    <span
+      style={{
+        display: "inline-block",
+        padding: "0.15rem 0.55rem",
+        borderRadius: "999px",
+        fontSize: "0.8rem",
+        background: bg,
+        color: fg,
+      }}
+    >
+      {label}
+    </span>
+  );
+}
+
 function downloadCsvTemplate() {
   const csv = CSV_HEADERS.join(",") + "\n";
   const blob = new Blob(["﻿" + csv], { type: "text/csv;charset=utf-8" });
@@ -85,6 +109,7 @@ export default function VehiclesPage() {
           <thead>
             <tr>
               <th>Marka / model</th>
+              <th>Status</th>
               <th>Godina</th>
               <th>Registracija</th>
               <th>Ističe</th>
@@ -104,6 +129,9 @@ export default function VehiclesPage() {
                       ⚠️
                     </span>
                   )}
+                </td>
+                <td>
+                  <StatusBadge status={v.status} />
                 </td>
                 <td>{v.year ?? "—"}</td>
                 <td>{v.licensePlate}</td>

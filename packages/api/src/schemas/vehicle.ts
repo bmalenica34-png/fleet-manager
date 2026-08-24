@@ -8,6 +8,7 @@ export const vehicleCreateSchema = z.object({
   vin: z.string().min(1).optional(),
   registrationDocKey: z.string().min(1).optional(),
   registrationExpiresAt: z.coerce.date().optional(),
+  underService: z.boolean().optional(),
 });
 export type VehicleCreateInput = z.infer<typeof vehicleCreateSchema>;
 

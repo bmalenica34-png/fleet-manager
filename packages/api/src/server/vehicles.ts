@@ -7,6 +7,14 @@ import type {
 } from "../schemas/vehicle";
 import { deleteObject, getPresignedDownloadUrl } from "../storage/hetzner";
 import { parseHrDateToIso } from "../lib/dateFormat";
+import { findCurrentContractForVehicle } from "./contracts";
+
+// "on_service" nadjačava sve ostalo (ručni toggle, vidi Vehicle.underService
+// u schema.prisma). "rented"/"available" su izvedeni iz postojanja tekućeg
+// ugovora (findCurrentContractForVehicle u ./contracts - ISTI upit koji
+// koristi i blokada duplog ugovora kod kreiranja, da definicija "pod
+// ugovorom" ostane dosljedna na oba mjesta).
+export type VehicleStatus = "on_service" | "rented" | "available";
 
 export interface VehicleDTO {
   id: string;
@@ -21,6 +29,8 @@ export interface VehicleDTO {
   images: { id: string; url: string }[];
   hasIncompleteData: boolean;
   incompleteReasons: string[];
+  underService: boolean;
+  status: VehicleStatus;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -28,7 +38,7 @@ export interface VehicleDTO {
 async function toVehicleDTO(
   vehicle: Vehicle & { images: VehicleImage[] }
 ): Promise<VehicleDTO> {
-  const [registrationDocUrl, insurancePolicyUrl, images] = await Promise.all([
+  const [registrationDocUrl, insurancePolicyUrl, images, currentContract] = await Promise.all([
     vehicle.registrationDocKey
       ? getPresignedDownloadUrl(vehicle.registrationDocKey)
       : Promise.resolve(null),
@@ -41,7 +51,16 @@ async function toVehicleDTO(
         url: await getPresignedDownloadUrl(image.key),
       }))
     ),
+    // Nepotrebno pitati bazu ako je vozilo na servisu - taj status svejedno
+    // nadjačava rezultat.
+    vehicle.underService ? Promise.resolve(null) : findCurrentContractForVehicle(vehicle.id),
   ]);
+
+  const status: VehicleStatus = vehicle.underService
+    ? "on_service"
+    : currentContract
+      ? "rented"
+      : "available";
 
   return {
     id: vehicle.id,
@@ -56,6 +75,8 @@ async function toVehicleDTO(
     images,
     hasIncompleteData: vehicle.hasIncompleteData,
     incompleteReasons: vehicle.incompleteReasons,
+    underService: vehicle.underService,
+    status,
     createdAt: vehicle.createdAt,
     updatedAt: vehicle.updatedAt,
   };

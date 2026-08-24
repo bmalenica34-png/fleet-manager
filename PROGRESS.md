@@ -4,7 +4,109 @@ Dinamički log stanja projekta. Ažurira se na kraju svake sesije. Za statičnu
 arhitekturu/konvencije vidi [CLAUDE.md](CLAUDE.md) — ovaj dokument je "što je
 gotovo i zašto", ne "kako treba izgledati".
 
-**Zadnje ažurirano:** 2026-08-24, dvadesettreći nastavak - korisnik zatražio
+**Zadnje ažurirano:** 2026-08-24, dvadesetčetvrti nastavak - korisnik zatražio
+status vozila (pod ugovorom/slobodno/na servisu), prijevremeno zatvaranje
+ugovora, i blokadu duplog ugovora za isto vozilo. Sva tri dijela dijele ISTI
+izvor istine za "vozilo ima tekući ugovor" - namjerno, da definicija ostane
+dosljedna svugdje.
+
+**1) Shema.** `Vehicle.underService` (boolean, default false) - ručni toggle,
+NIJE izveden ni iz čega, vlasnik ga sam postavlja/miče. `Contract.closedAt` +
+`Contract.actualEndDate` (oba nullable DateTime) - postavlja ih SAMO
+`closeContractEarly()`. `dateTo` (originalno ugovoreni datum) OSTAJE netaknut
+kao povijesni podatak - ništa ga ne prepisuje, `actualEndDate` bilježi kad je
+najam STVARNO završio. `ContractStatus` enum NIJE dirian (nema novog "closed"
+statusa) - "zatvoren" se izvodi iz `closedAt !== null`, ne iz statusa, jer
+ugovor je i dalje stvarno bio "signed", samo je prijevremeno okončan.
+
+**2) `findCurrentContractForVehicle(vehicleId)`** (novo, `server/contracts.ts`)
+- JEDINI upit koji definira "vozilo ima tekući ugovor": `status: "signed"`,
+`dateFrom <= danas <= dateTo`, `closedAt: null`. Koriste ga TRI mjesta: (a)
+`toVehicleDTO` (`server/vehicles.ts`) za computed `status` polje na
+`VehicleDTO` (`"on_service" | "rented" | "available"` - `underService`
+nadjačava sve, provjerava se prvo da se izbjegne nepotreban DB upit), (b)
+`createContractAndSendSigningEmail` baca novi `VehicleHasActiveContractError`
+(nosi postojeći ugovor) ako vozilo već ima tekući ugovor - **stvarna
+server-side blokada**, ne samo UI upozorenje koje se može zaobići izravnim
+API pozivom, (c) nova `GET /api/vehicles/[id]/active-contract` ruta koju
+`/contracts/new` poziva na promjenu odabranog vozila.
+
+**3) `closeContractEarly(id)`** (novo, `server/contracts.ts`) - lagana
+verzija bez foto/šteta koraka (eksplicitno traženo, puni "close contract"
+flow s primopredajom je poseban budući zadatak). Odbija ugovore koji nisu
+`"signed"` ili su već zatvoreni (`closedAt` postavljen) - baca
+`contract_not_closable`. Nova `POST /api/contracts/[id]/close`
+(`requireModulePermission(request, "contracts")`).
+
+**4) Blokada duplog ugovora - UI flow.** `/contracts/new`: na promjenu
+odabranog vozila, poziva `active-contract` rutu; ako vraća ugovor, prikazuje
+amber upozorenje (broj ugovora, klijent, datum do) s gumbom "Zatvori
+postojeći ugovor" (poziva close rutu izravno, bez napuštanja forme -
+korisnikov eksplicitan zahtjev "umjesto da korisnik mora sam tražiti taj
+ugovor") i onemogućuje submit dok upozorenje traje. Server-side POST
+`/api/contracts` isto tako odbija (409, `vehicle_has_active_contract`) kao
+safety net za race-uvjete/izravne API pozive - ruta hvata
+`VehicleHasActiveContractError` i vraća podatke o postojećem ugovoru u JSON-u
+(klijent, kod duplog pokušaja preko forme se time popuni isto upozorenje).
+
+**5) UI - status prikaz i akcije.** `/vehicles` lista: novi "Status" stupac,
+badge komponenta (zeleno/plavo/sivo za slobodno/pod ugovorom/na servisu).
+`/vehicles/[id]`: isti badge pored naslova + gumb "Označi na servisu"/"Vrati
+u pogon" (PATCH `/api/vehicles/[id]` s `{underService}`, reuse postojeće
+rute/scheme - nije trebao novi endpoint). Postojeći "aktivan ugovor" banner
+na istoj stranici proširen provjerom `!c.closedAt` (prije bi i zatvoren
+ugovor unutar svog izvornog `dateTo` raspona i dalje lažno pokazivao kao
+aktivan) + gumb "Zatvori ugovor prijevremeno" izravno u banneru. `/contracts`
+lista: `isActive()` helper isto proširen `!c.closedAt` provjerom (isti
+propust bi postojao za "Zatraži slike" gumb da nije popravljen), nova
+"Zatvaranje" kolona (gumb dok je aktivan, "Zatvoren {datum}" nakon).
+
+**Namjerno NE dirano:** mobile appovi (owner-mobile) - zahtjev nije spominjao
+mobile, isti pristup kao raniji web-first nastavci gdje mobile prati kasnije
+ako korisnik eksplicitno zatraži.
+
+**Migracija** (ručno napisana, isti razlog kao prijašnjih osam nastavaka) -
+`vehicles.underService` (boolean NOT NULL default false), `contracts.closedAt`
++ `contracts.actualEndDate` (oba nullable timestamp). Primijenjena `prisma
+migrate deploy` izravno na produkcijsku bazu - **korisnik eksplicitno pitan
+za potvrdu prije pokretanja** (auto-mode classifier je sam blokirao prvi
+pokušaj kao promjenu produkcijske sheme), odobreno, migracija uspješno
+primijenjena.
+
+**Verifikacija.** `tsc --noEmit` čist na sva tri paketa, `next build` čist
+(nove rute `/api/contracts/[id]/close`, `/api/vehicles/[id]/active-contract`
+vidljive u outputu). **Stvaran end-to-end test protiv produkcijske baze**
+(privremena debug ruta bez auth-a, isti obrazac kao prijašnjih osam
+nastavaka - prva verzija stavljena u `api/_debug/...` je tiho vratila 404 jer
+Next.js App Router tretira `_`-prefiksirane foldere kao private/izvan
+routinga, preimenovano u `api/debug-vehicle-status-test` i radilo). Deset
+koraka, svi prošli: (1) novo vozilo → `"available"`, (2) `underService: true`
+→ `"on_service"`, (3) natrag `false` → `"available"`, (4) fabriciran
+`"signed"` ugovor (jučer-sutra raspon, izravan `prisma.contract.create`,
+zaobiđen pravi signing/email flow) → vozilo `"rented"`, (5)
+`findCurrentContractForVehicle` pronalazi točno taj ugovor, (6) pokušaj
+`createContractAndSendSigningEmail` za isto vozilo baca
+`VehicleHasActiveContractError` s ispravnim `contract.id` (potvrđeno da se
+NIKAD ne stigne do slanja mail-a - baca se prije `sendContractSigningEmail`
+poziva, pa test nije poslao nikakav pravi email), (7) `closeContractEarly`
+postavlja `closedAt`/`actualEndDate`, (8) vozilo natrag `"available"`, (9)
+`findCurrentContractForVehicle` sad vraća `null`, (10) drugi poziv
+`closeContractEarly` na isti (već zatvoren) ugovor ispravno baca. Test
+podaci (1 vozilo, 1 klijent, 1 ugovor) obrisani u `finally` bloku bez obzira
+na ishod - **eksplicitno potvrđeno upitom nad produkcijskom bazom da nema
+ostatka** (`email: "test@example.com"` count `0`; usputno uočen NEPOVEZAN
+pre-postojeći "Test Klijent" red iz sesije od 14.08. pod istim generičkim
+imenom - nije moj test, provjereno po različitom OIB-u/emailu, namjerno
+netaknut). Debug ruta uklonjena nakon verifikacije (`git status` potvrđuje
+čist diff, samo namjeravane izmjene ostale). Nije testirano kroz pravi owner
+login klik u browseru (magic-link auth) - isti razlog kao svugdje ranije u
+ovom logu (trošak procijenjen prevelikim za ovu klasu promjene), oslonjeno na
+tsc+build+izravno testiranu podatkovnu/business logiku iznad koju UI samo
+tanko omata.
+
+---
+
+**Prijašnji dio (dvadesettreći nastavak)** - korisnik zatražio
 bulk unos vozila putem CSV uploada. **Otkriven i riješen genuine konflikt u
 zahtjevu prije implementacije** - detaljna numerirana specifikacija (sekcija
 3) eksplicitno kaže "NIŠTA se ne preskače zbog nedostajućih/lošeg formata

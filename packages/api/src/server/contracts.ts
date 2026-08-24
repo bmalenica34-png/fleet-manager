@@ -129,6 +129,65 @@ export async function listContractsForClientUser(userId: string): Promise<Contra
 }
 
 /**
+ * "Tekući" ugovor za vozilo - potpisan, danas je unutar dateFrom/dateTo, i
+ * NIJE prijevremeno zatvoren (closedAt null). Ovo je JEDINI izvor istine za
+ * "vozilo je pod ugovorom" - koristi ga i toVehicleDTO (server/vehicles.ts,
+ * computed status na listi/detalju vozila) i blokada duplog ugovora niže,
+ * da definicija ostane dosljedna na oba mjesta.
+ */
+export async function findCurrentContractForVehicle(
+  vehicleId: string
+): Promise<ContractWithRelations | null> {
+  const now = new Date();
+  return prisma.contract.findFirst({
+    where: {
+      vehicleId,
+      status: "signed",
+      dateFrom: { lte: now },
+      dateTo: { gte: now },
+      closedAt: null,
+    },
+    include: { vehicle: true, client: true },
+    orderBy: { createdAt: "desc" },
+  });
+}
+
+/**
+ * Bačeno iz createContractAndSendSigningEmail kad vozilo već ima tekući
+ * ugovor - ruta niz tok hvata ovo posebno i vraća 409 s podacima o
+ * postojećem ugovoru, da UI može ponuditi izravan gumb za njegovo
+ * zatvaranje umjesto generičke greške.
+ */
+export class VehicleHasActiveContractError extends Error {
+  constructor(public readonly contract: ContractWithRelations) {
+    super("vehicle_has_active_contract");
+    this.name = "VehicleHasActiveContractError";
+  }
+}
+
+/**
+ * Prijevremeno zatvaranje aktivnog ugovora - lagana verzija (bez foto/šteta
+ * koraka, vidi zahtjev). `dateTo` (originalno ugovoreni datum) OSTAJE
+ * netaknut kao povijesni podatak; `actualEndDate`/`closedAt` bilježe kad je
+ * najam STVARNO završen. Odbija ugovore koji nisu trenutno "signed" ili su
+ * već zatvoreni - nema smisla zatvoriti draft/sent/expired ili već zatvoren
+ * ugovor.
+ */
+export async function closeContractEarly(id: string): Promise<ContractWithRelations> {
+  const contract = await prisma.contract.findUniqueOrThrow({ where: { id } });
+  if (contract.status !== "signed" || contract.closedAt) {
+    throw new Error("contract_not_closable");
+  }
+
+  const now = new Date();
+  return prisma.contract.update({
+    where: { id },
+    data: { closedAt: now, actualEndDate: now },
+    include: { vehicle: true, client: true },
+  });
+}
+
+/**
  * Kreira ugovor u "draft" statusu, generira jednokratan 48h signing token,
  * te šalje mail klijentu s linkom za potpis. Status prelazi u "sent" tek
  * nakon što je mail uspješno poslan.
@@ -143,6 +202,11 @@ export async function createContractAndSendSigningEmail(
     prisma.vehicle.findUniqueOrThrow({ where: { id: input.vehicleId } }),
     prisma.client.findUniqueOrThrow({ where: { id: input.clientId } }),
   ]);
+
+  const activeContract = await findCurrentContractForVehicle(input.vehicleId);
+  if (activeContract) {
+    throw new VehicleHasActiveContractError(activeContract);
+  }
 
   // TODO (samo ako owner kasnije eksplicitno zatraži): ovdje bi išla
   // provjera kompletnosti klijentovih dokumenata (osobna+vozačka, obje
