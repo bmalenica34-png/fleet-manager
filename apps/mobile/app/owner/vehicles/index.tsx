@@ -56,9 +56,14 @@ export default function VehiclesList() {
         <View style={{ width: 60 }} />
       </View>
 
-      <Pressable style={styles.newButton} onPress={() => router.push("/owner/vehicles/new")}>
-        <Text style={styles.newButtonText}>+ Dodaj vozilo</Text>
-      </Pressable>
+      <View style={{ flexDirection: "row", gap: 8 }}>
+        <Pressable style={[styles.newButton, { flex: 1 }]} onPress={() => router.push("/owner/vehicles/new")}>
+          <Text style={styles.newButtonText}>+ Dodaj vozilo</Text>
+        </Pressable>
+        <Pressable style={[styles.newButton, { flex: 1 }]} onPress={() => router.push("/owner/vehicles/stats")}>
+          <Text style={styles.newButtonText}>Statistika flote</Text>
+        </Pressable>
+      </View>
 
       {loading ? (
         <ActivityIndicator style={{ marginTop: 24 }} />

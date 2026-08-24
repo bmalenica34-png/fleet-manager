@@ -409,3 +409,30 @@ export function parseVehicleActiveContractConflict(err: unknown): ActiveContract
 export function requestContractPhotos(contractId: string): Promise<unknown> {
   return apiFetch(`/api/contracts/${contractId}/photo-requests`, { method: "POST" });
 }
+
+// --- Statistika/profitabilnost ---
+// Isti "prvi pokušaj" pragovi kao web (server/vehicleStats.ts) - "no_activity"
+// je dodatno 4. stanje uz zeleno/žuto/crveno iz zahtjeva, za vozilo bez
+// ijednog dana pod ugovorom I bez ijednog servisnog troška u razdoblju.
+export type VehicleStatsStatus = "good" | "ok" | "bad" | "no_activity";
+
+export interface VehicleStatsDTO {
+  vehicleId: string;
+  totalDays: number;
+  rentedDays: number;
+  freeDays: number;
+  revenue: number;
+  serviceCost: number;
+  profit: number;
+  utilization: number;
+  status: VehicleStatsStatus;
+}
+
+/** `from`/`to` su "YYYY-MM-DD" stringovi - isti `?from=&to=` obrazac kao web. */
+export function getVehicleStats(vehicleId: string, from: string, to: string): Promise<VehicleStatsDTO> {
+  return apiFetch(`/api/vehicles/${vehicleId}/stats?from=${from}&to=${to}`);
+}
+
+export function getFleetStats(from: string, to: string): Promise<VehicleStatsDTO[]> {
+  return apiFetch(`/api/vehicles/stats?from=${from}&to=${to}`);
+}

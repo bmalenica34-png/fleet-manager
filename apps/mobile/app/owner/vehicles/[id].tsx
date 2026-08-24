@@ -28,6 +28,7 @@ import {
   closeContract,
   deleteVehicleImage,
   getVehicle,
+  getVehicleStats,
   listContracts,
   ocrInsurancePolicy,
   ocrRegistrationDocInner,
@@ -39,13 +40,15 @@ import {
   type ContractListItem,
   type PickedFile,
   type VehicleDTO,
+  type VehicleStatsDTO,
+  type VehicleStatsStatus,
   type VehicleStatus,
 } from "../../../src/lib/api";
 
 const CURRENT_YEAR = new Date().getFullYear();
 const YEAR_OPTIONS = Array.from({ length: CURRENT_YEAR + 1 - 1980 + 1 }, (_, i) => CURRENT_YEAR + 1 - i);
 
-type VehicleTab = "info" | "documents" | "images" | "service" | "contracts";
+type VehicleTab = "info" | "documents" | "images" | "service" | "contracts" | "stats";
 
 const TABS: { id: VehicleTab; label: string }[] = [
   { id: "info", label: "Podaci" },
@@ -53,7 +56,36 @@ const TABS: { id: VehicleTab; label: string }[] = [
   { id: "images", label: "Slike" },
   { id: "service", label: "Servis" },
   { id: "contracts", label: "Ugovori" },
+  { id: "stats", label: "Statistika" },
 ];
+
+const STATS_STATUS_BADGE: Record<VehicleStatsStatus, { label: string; bg: string; fg: string }> = {
+  good: { label: "Dobro", bg: "#f0fdf4", fg: "#166534" },
+  ok: { label: "Prosječno", bg: "#fefce8", fg: "#854d0e" },
+  bad: { label: "Loše", bg: "#fef2f2", fg: "#b91c1c" },
+  no_activity: { label: "Bez aktivnosti", bg: "#f3f4f6", fg: "#374151" },
+};
+
+function StatsStatusBadge({ status }: { status: VehicleStatsStatus }) {
+  const { label, bg, fg } = STATS_STATUS_BADGE[status];
+  return (
+    <View style={[styles.badge, { backgroundColor: bg }]}>
+      <Text style={[styles.badgeText, { color: fg }]}>{label}</Text>
+    </View>
+  );
+}
+
+const STATS_RANGE_PRESETS = [7, 30, 90] as const;
+
+function isoDateNDaysAgo(days: number): string {
+  const d = new Date();
+  d.setDate(d.getDate() - days);
+  return d.toISOString().slice(0, 10);
+}
+
+function todayIsoDate(): string {
+  return new Date().toISOString().slice(0, 10);
+}
 
 const STATUS_BADGE: Record<VehicleStatus, { label: string; bg: string; fg: string }> = {
   on_service: { label: "Na servisu", bg: "#f3f4f6", fg: "#374151" },
@@ -133,6 +165,20 @@ export default function VehicleDetail() {
   const [closingContractId, setClosingContractId] = useState<string | null>(null);
   const [closeContractError, setCloseContractError] = useState<string | null>(null);
 
+  // Statistika - default zadnjih 30 dana. `statsRangeDays` null znači
+  // "prilagođen raspon" (custom tekstualna polja ispod, isti DD.MM.GGGG. +
+  // parseHrDateToIso obrazac kao "Datum isteka registracije" polje gore u
+  // ovom fajlu - RN nema built-in date input, i ovaj repo nema instaliran
+  // native date-picker paket, pa se ne uvodi nova native ovisnost samo za
+  // ovo, isti razlog kao izbjegavanje Expo web ranije).
+  const [statsRangeDays, setStatsRangeDays] = useState<number | null>(30);
+  const [statsFrom, setStatsFrom] = useState(() => isoDateNDaysAgo(29));
+  const [statsTo, setStatsTo] = useState(() => todayIsoDate());
+  const [statsFromHr, setStatsFromHr] = useState("");
+  const [statsToHr, setStatsToHr] = useState("");
+  const [stats, setStats] = useState<VehicleStatsDTO | null>(null);
+  const [statsLoading, setStatsLoading] = useState(false);
+
   const load = useCallback(() => {
     setError(null);
     getVehicle(id)
@@ -180,6 +226,40 @@ export default function VehicleDetail() {
   }, [loadContracts]);
 
   const vehicleContracts = contracts.filter((c) => c.vehicleId === id);
+
+  useEffect(() => {
+    if (activeTab !== "stats") return;
+    if (!statsFrom || !statsTo) return;
+    setStatsLoading(true);
+    getVehicleStats(id, statsFrom, statsTo)
+      .then(setStats)
+      .catch(() => setStats(null))
+      .finally(() => setStatsLoading(false));
+  }, [activeTab, id, statsFrom, statsTo]);
+
+  function selectStatsPreset(days: number) {
+    setStatsRangeDays(days);
+    setStatsFrom(isoDateNDaysAgo(days - 1));
+    setStatsTo(todayIsoDate());
+  }
+
+  function selectStatsCustomRange() {
+    setStatsRangeDays(null);
+    setStatsFromHr(isoToHrDate(statsFrom));
+    setStatsToHr(isoToHrDate(statsTo));
+  }
+
+  function handleStatsFromHrChange(value: string) {
+    setStatsFromHr(value);
+    const parsed = parseHrDateToIso(value);
+    if (parsed) setStatsFrom(parsed);
+  }
+
+  function handleStatsToHrChange(value: string) {
+    setStatsToHr(value);
+    const parsed = parseHrDateToIso(value);
+    if (parsed) setStatsTo(parsed);
+  }
 
   async function handleToggleUnderService() {
     if (!vehicle) return;
@@ -846,8 +926,70 @@ export default function VehicleDetail() {
           )}
         </View>
       )}
+
+      {activeTab === "stats" && (
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Statistika</Text>
+
+          <View style={styles.chipWrap}>
+            {STATS_RANGE_PRESETS.map((days) => (
+              <Pressable
+                key={days}
+                style={[styles.chip, statsRangeDays === days && styles.chipActive]}
+                onPress={() => selectStatsPreset(days)}
+              >
+                <Text style={statsRangeDays === days ? styles.chipTextActive : styles.chipText}>
+                  Zadnjih {days} dana
+                </Text>
+              </Pressable>
+            ))}
+            <Pressable
+              style={[styles.chip, statsRangeDays === null && styles.chipActive]}
+              onPress={selectStatsCustomRange}
+            >
+              <Text style={statsRangeDays === null ? styles.chipTextActive : styles.chipText}>
+                Prilagodi
+              </Text>
+            </Pressable>
+          </View>
+
+          {statsRangeDays === null && (
+            <>
+              <Field label="Od (DD.MM.GGGG.)" value={statsFromHr} onChangeText={handleStatsFromHrChange} />
+              <Field label="Do (DD.MM.GGGG.)" value={statsToHr} onChangeText={handleStatsToHrChange} />
+            </>
+          )}
+
+          {statsLoading || !stats ? (
+            <ActivityIndicator />
+          ) : (
+            <View style={{ gap: 6, marginTop: 4 }}>
+              <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+                <StatsStatusBadge status={stats.status} />
+                <Text style={styles.muted}>
+                  {stats.totalDays} dana u razdoblju · iskorištenost {(stats.utilization * 100).toFixed(0)}%
+                </Text>
+              </View>
+              <StatRow label="Dana pod ugovorom" value={String(stats.rentedDays)} />
+              <StatRow label="Dana slobodno" value={String(stats.freeDays)} />
+              <StatRow label="Prihod" value={`${stats.revenue.toFixed(2)} €`} />
+              <StatRow label="Trošak servisa" value={`${stats.serviceCost.toFixed(2)} €`} />
+              <StatRow label="Profit" value={`${stats.profit.toFixed(2)} €`} bold />
+            </View>
+          )}
+        </View>
+      )}
     </ScrollView>
     </KeyboardAvoidingView>
+  );
+}
+
+function StatRow({ label, value, bold }: { label: string; value: string; bold?: boolean }) {
+  return (
+    <View style={{ flexDirection: "row", justifyContent: "space-between" }}>
+      <Text style={bold ? styles.contractCardTitle : styles.muted}>{label}</Text>
+      <Text style={bold ? styles.contractCardTitle : undefined}>{value}</Text>
+    </View>
   );
 }
 

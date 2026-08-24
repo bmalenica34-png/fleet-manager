@@ -4,7 +4,76 @@ Dinamički log stanja projekta. Ažurira se na kraju svake sesije. Za statičnu
 arhitekturu/konvencije vidi [CLAUDE.md](CLAUDE.md) — ovaj dokument je "što je
 gotovo i zašto", ne "kako treba izgledati".
 
-**Zadnje ažurirano:** 2026-08-24, dvadesetsedmi nastavak - korisnik zatražio
+**Zadnje ažurirano:** 2026-08-24, dvadesetosmi nastavak - korisnik zatražio
+statistiku/profitabilnost po vozilu na owner-mobileu (web dio već gotov u
+prošlom nastavku) - **korisnik eksplicitno postavio novu trajnu politiku**:
+"od sad mobile MORA imati sve mogućnosti kao web, ne dodavati ga naknadno
+kao poseban korak". Spremljeno u trajnu memoriju
+(`feedback_mobile_web_parity.md`) da se ubuduće owner-mobile implementira
+ISTOVREMENO s owner-webom za owner-facing feature, ne kao odvojen naknadni
+zahtjev (client-web/client-mobile scope ostaje nepromijenjen ovom politikom).
+
+**Dijeljena logika ostaje isključivo u `@rent-a-car/api`** (`server/
+vehicleStats.ts`, već postojao od prošlog nastavka, ništa nije diran) -
+mobile poziva ISTE `GET /api/vehicles/[id]/stats` i `GET /api/vehicles/stats`
+rute preko novih `getVehicleStats`/`getFleetStats` funkcija u `src/lib/
+api.ts` (isti `apiFetch` obrazac kao sve ostalo, `from`/`to` kao
+"YYYY-MM-DD" query parametri).
+
+**Date-range selektor - NAMJERNO bez native date-pickera.** Zahtjev je
+tražio "native picker", ali repo nema instaliran nijedan date-picker paket
+(`@react-native-community/datetimepicker` i sl.) - dodavanje novog native
+modula zahtijeva native rebuild koji se ne može testirati u ovom okruženju
+(nema simulatora/uređaja, i poznat je krhak Android native build na ovom
+Windows stroju, vidi `project_dev_server_gotchas`). Umjesto toga: brzi
+"chip" preseti (7/30/90 dana, isti chip UI obrazac već korišten za
+marku/model/godinu u ovom fajlu) + "Prilagodi" opcija koja otkriva
+DD.MM.GGGG. tekstualna polja (identičan obrazac kao već postojeće "Datum
+isteka registracije" polje u istom fajlu, `parseHrDateToIso`/`isoToHrDate`).
+Ovo je svjestan kompromis - "native picker" bi bio ljepši UX, ali cijena
+(nova native ovisnost, netestabilna ovdje) procijenjena preskupom za dobit.
+
+**Web `/vehicles/[id]` "Statistika" tab i `/vehicles/stats` stranica
+replicirani 1:1** - isti chip preset + custom raspon obrazac (mobile
+ekvivalent web `<input type="date">`), isti brojevi (dana pod ugovorom/
+slobodno, prihod, trošak servisa, profit), ista boja statusa
+(good/ok/bad/no_activity), ista "sortirano po profitu opadajuće" tablica/
+lista za cijelu flotu. Nova `apps/mobile/app/owner/vehicles/stats.tsx`
+(FlatList, isti obrazac kao `vehicles/index.tsx`) - statička ruta ispravno
+NE kolidira s dinamičkom `[id].tsx` (expo-router prioritizira statičke
+segmente, već dokazano u ovom direktoriju kroz `new.tsx`). Gumb "Statistika
+flote" dodan uz "+ Dodaj vozilo" na `vehicles/index.tsx`.
+
+**Usput uhvaćena i ispravljena vlastita greška** - prva verzija nove
+`vehicles/stats.tsx` datoteke koristila je `require("react-native")` unutar
+komponente kao improviziran workaround jer je `TextInput` bio zaboravljen u
+top-level importu - nekonzistentno s ESM-only konvencijom cijelog repoa
+(nijedan drugi fajl ne koristi `require`). Uočeno prije verifikacije,
+popravljeno dodavanjem `TextInput`-a u standardni `import` i uklanjanjem
+wrapper funkcije.
+
+**Namjerno NE dirano ovaj nastavak (postojeći, poznat gap, izvan traženog
+scopea):** mobile "Servis" tab i dalje pokazuje "uskoro" placeholder -
+puna Servisna knjižica (unos/lista/upload računa) implementirana je SAMO na
+webu prije dva nastavka, mobile parity za TU značajku nije bio dio ovog
+zahtjeva (koji je bio specifično scoped na statistiku). Spomenuto korisniku
+u sažetku sesije - pod novom politikom paritetnosti ovo je sad eksplicitan
+poznat dug, čeka potvrdu treba li se odraditi.
+
+**Verifikacija.** `tsc --noEmit` čist na sva tri paketa. Nije primijenjena
+nova migracija (nije bilo potrebno - ništa novo u shemi ovaj nastavak).
+Nije ponovljen end-to-end debug-ruta test protiv produkcijske baze - logika
+izračuna (`vehicleStats.ts`) je već izravno testirana u prošlom nastavku i
+nije mijenjana, ovaj nastavak je čisto UI sloj koji poziva već potvrđene
+API rute preko već potvrđenog `apiFetch` mehanizma (isti obrazac koji svaki
+prijašnji mobile-port nastavak koristi bez ponovnog low-level testiranja
+dijeljene logike). Nije testirano na fizičkom uređaju/simulatoru - isti
+razlog kao svaki prijašnji mobile nastavak (nema spojen simulator/uređaj u
+ovom okruženju, Expo web target nije postavljen u projektu).
+
+---
+
+**Prijašnji dio (dvadesetsedmi nastavak)** - korisnik zatražio
 statistiku/profitabilnost po vozilu. Nema nove Prisma sheme - sve se računa
 iz postojećih `Contract`/`ServiceRecord` polja (bez migracije ovaj put).
 
