@@ -34,8 +34,7 @@
     },
     "@rent-a-car/api#build": {
       "dependsOn": ["^build"],
-      "outputs": [],
-      "env": ["DATABASE_URL", "DIRECT_URL"]
+      "outputs": []
     },
     "dev": {
       "cache": false,
