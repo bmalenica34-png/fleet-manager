@@ -51,7 +51,7 @@ function StatusBadge({ status }: { status: VehicleDTO["status"] }) {
   );
 }
 
-type VehicleTab = "info" | "documents" | "images" | "service" | "contracts";
+type VehicleTab = "info" | "documents" | "images" | "service" | "contracts" | "stats";
 
 const TABS: { id: VehicleTab; label: string }[] = [
   { id: "info", label: "Podaci o vozilu" },
@@ -59,7 +59,57 @@ const TABS: { id: VehicleTab; label: string }[] = [
   { id: "images", label: "Slike vozila" },
   { id: "service", label: "Servisna knjižica" },
   { id: "contracts", label: "Ugovori" },
+  { id: "stats", label: "Statistika" },
 ];
+
+const STATS_STATUS_BADGE: Record<
+  "good" | "ok" | "bad" | "no_activity",
+  { label: string; bg: string; fg: string }
+> = {
+  good: { label: "Dobro", bg: "#f0fdf4", fg: "#166534" },
+  ok: { label: "Prosječno", bg: "#fefce8", fg: "#854d0e" },
+  bad: { label: "Loše", bg: "#fef2f2", fg: "#b91c1c" },
+  no_activity: { label: "Bez aktivnosti", bg: "#f3f4f6", fg: "#374151" },
+};
+
+function StatsStatusBadge({ status }: { status: "good" | "ok" | "bad" | "no_activity" }) {
+  const { label, bg, fg } = STATS_STATUS_BADGE[status];
+  return (
+    <span
+      style={{
+        display: "inline-block",
+        padding: "0.15rem 0.55rem",
+        borderRadius: "999px",
+        fontSize: "0.8rem",
+        background: bg,
+        color: fg,
+      }}
+    >
+      {label}
+    </span>
+  );
+}
+
+function todayIsoDate(): string {
+  return new Date().toISOString().slice(0, 10);
+}
+
+function daysAgoIsoDate(days: number): string {
+  const d = new Date();
+  d.setDate(d.getDate() - days);
+  return d.toISOString().slice(0, 10);
+}
+
+interface VehicleStatsDTO {
+  totalDays: number;
+  rentedDays: number;
+  freeDays: number;
+  revenue: number;
+  serviceCost: number;
+  profit: number;
+  utilization: number;
+  status: "good" | "ok" | "bad" | "no_activity";
+}
 
 export default function VehicleDetailPage() {
   const params = useParams<{ id: string }>();
@@ -92,6 +142,15 @@ export default function VehicleDetailPage() {
   const [savingServiceRecord, setSavingServiceRecord] = useState(false);
   const [serviceRecordError, setServiceRecordError] = useState<string | null>(null);
   const [deletingServiceRecordId, setDeletingServiceRecordId] = useState<string | null>(null);
+
+  // Statistika - default zadnjih 30 dana (uklj. danas), samo se učitava kad
+  // je tab stvarno otvoren (za razliku od contracts/service gore) jer
+  // zahtijeva vlastiti API poziv po promjeni raspona, nema smisla ga
+  // okinuti prije nego ga korisnik uopće pogleda.
+  const [statsFrom, setStatsFrom] = useState(() => daysAgoIsoDate(29));
+  const [statsTo, setStatsTo] = useState(() => todayIsoDate());
+  const [stats, setStats] = useState<VehicleStatsDTO | null>(null);
+  const [statsLoading, setStatsLoading] = useState(false);
 
   const [make, setMake] = useState("");
   const [customMake, setCustomMake] = useState("");
@@ -178,6 +237,16 @@ export default function VehicleDetailPage() {
   }, [vehicleId]);
 
   const totalServiceCost = serviceRecords.reduce((sum, r) => sum + r.cost, 0);
+
+  useEffect(() => {
+    if (activeTab !== "stats") return;
+    if (!statsFrom || !statsTo) return;
+    setStatsLoading(true);
+    fetch(`/api/vehicles/${vehicleId}/stats?from=${statsFrom}&to=${statsTo}`)
+      .then((res) => res.json())
+      .then(setStats)
+      .finally(() => setStatsLoading(false));
+  }, [activeTab, vehicleId, statsFrom, statsTo]);
 
   const vehicleContracts = contracts.filter((c) => c.vehicleId === vehicleId);
 
@@ -1154,6 +1223,63 @@ export default function VehicleDetailPage() {
                 ))}
               </tbody>
             </table>
+          )}
+        </div>
+      )}
+
+      {activeTab === "stats" && (
+        <div style={{ marginTop: "2rem" }}>
+          <div style={{ display: "flex", gap: "1rem", alignItems: "flex-end", marginBottom: "1rem" }}>
+            <label>
+              Od
+              <input type="date" value={statsFrom} onChange={(e) => setStatsFrom(e.target.value)} />
+            </label>
+            <label>
+              Do
+              <input type="date" value={statsTo} onChange={(e) => setStatsTo(e.target.value)} />
+            </label>
+          </div>
+
+          {statsLoading || !stats ? (
+            <p className="muted">Učitavanje...</p>
+          ) : (
+            <>
+              <div style={{ display: "flex", alignItems: "center", gap: "0.75rem", marginBottom: "1rem" }}>
+                <StatsStatusBadge status={stats.status} />
+                <span className="muted">
+                  {stats.totalDays} dana u razdoblju · iskorištenost {(stats.utilization * 100).toFixed(0)}%
+                </span>
+              </div>
+
+              <table>
+                <tbody>
+                  <tr>
+                    <td>Dana pod ugovorom</td>
+                    <td>{stats.rentedDays}</td>
+                  </tr>
+                  <tr>
+                    <td>Dana slobodno</td>
+                    <td>{stats.freeDays}</td>
+                  </tr>
+                  <tr>
+                    <td>Prihod</td>
+                    <td>{stats.revenue.toFixed(2)} €</td>
+                  </tr>
+                  <tr>
+                    <td>Trošak servisa</td>
+                    <td>{stats.serviceCost.toFixed(2)} €</td>
+                  </tr>
+                  <tr>
+                    <td>
+                      <strong>Profit</strong>
+                    </td>
+                    <td>
+                      <strong>{stats.profit.toFixed(2)} €</strong>
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </>
           )}
         </div>
       )}

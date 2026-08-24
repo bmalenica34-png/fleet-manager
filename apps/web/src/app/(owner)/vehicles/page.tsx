@@ -86,6 +86,9 @@ export default function VehiclesPage() {
           <a className="btn" href="/vehicles/import">
             Uvoz vozila (CSV)
           </a>
+          <a className="btn" href="/vehicles/stats">
+            Statistika flote
+          </a>
           <a className="btn btn-primary" href="/vehicles/new">
             + Novo vozilo
           </a>

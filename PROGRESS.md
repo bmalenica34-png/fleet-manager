@@ -4,7 +4,94 @@ Dinamički log stanja projekta. Ažurira se na kraju svake sesije. Za statičnu
 arhitekturu/konvencije vidi [CLAUDE.md](CLAUDE.md) — ovaj dokument je "što je
 gotovo i zašto", ne "kako treba izgledati".
 
-**Zadnje ažurirano:** 2026-08-24, dvadesetšesti nastavak - korisnik zatražio
+**Zadnje ažurirano:** 2026-08-24, dvadesetsedmi nastavak - korisnik zatražio
+statistiku/profitabilnost po vozilu. Nema nove Prisma sheme - sve se računa
+iz postojećih `Contract`/`ServiceRecord` polja (bez migracije ovaj put).
+
+**1) `server/vehicleStats.ts` - `getVehicleStats(vehicleId, from, to)`.**
+Dana pod ugovorom = broj JEDINSTVENIH dana (Set, ne zbroj po ugovoru) koje
+pokriva BILO KOJI `status: "signed"` ugovor tog vozila u razdoblju - dedupe
+namjerno, da se preklapajući ugovori (blokirano na kreiranju od prošlog
+nastavka, ali stariji podaci prije te blokade teoretski mogu postojati) ne
+naduju iznad 100% iskorištenosti. **Stvaran kraj ugovora** =
+`closedAt && actualEndDate ? actualEndDate : dateTo` - isti obrazac kao
+computed Vehicle.status iz prošlog nastavka (`findCurrentContractForVehicle`),
+ovdje primijenjen po danu umjesto "danas" trenutku.
+
+**Prihod se NE računa iz dedupe-anog dana-seta** - namjerno po ugovoru
+(`pricePerDay × dana koji upadaju u razdoblje`, zbrojeno preko svih
+ugovora), jer svaki ugovor ima svoju cijenu; ako bi se dva ugovora povijesno
+preklapala (rubni slučaj), prihod od oba se svejedno stvarno naplatio, pa
+dedupe ovdje ne bi bio ispravan.
+
+**Trošak servisa** = zbroj `ServiceRecord.cost` gdje `date` upada u
+razdoblje (izravan upit, ne cijela povijest).
+
+**Status pragovi (korisnikov eksplicitan "prvi pokušaj, može se kasnije fino
+podesiti").** Zahtjev je naveo 4 riječi (zeleno/žuto/crveno/upozorenje) ali
+konkretno definirao samo 3 pravila - protumačeno da je "upozorenje" 4.,
+odvojeno stanje za rubni slučaj bez ijednog podatka: `no_activity` (nula
+dana pod ugovorom I nula servisnog troška - vozilo bez ikakve aktivnosti u
+razdoblju, ni dobro ni loše, samo "nema što prosuditi"), zatim `good`
+(profit > 0 I iskorištenost > 60%), `ok` (profit > 0, niska iskorištenost),
+`bad` (profit ≤ 0). **Ovo je čitanje koje bi korisnik trebao potvrditi ili
+ispraviti** ako je "upozorenje" zapravo bilo mišljeno drugačije.
+
+**2) API rute.** `GET /api/vehicles/[id]/stats?from=&to=` (jedno vozilo),
+`GET /api/vehicles/stats?from=&to=` (cijela flota, `getFleetStats` - N upita
+po vozilu, "flota je mala" obrazac kao svugdje). Oba `requireOwnerSession`
+(read-only listing, isti obrazac kao ostale GET rute). Dijeljen
+`apps/web/src/lib/parseStatsDateRange.ts` (from/to parsing + validacija,
+default zadnjih 30 dana uklj. danas) - identična logika na oba mjesta,
+vrijedilo dijeliti umjesto duplicirati u dvije route datoteke. Statička
+`/api/vehicles/stats` route ispravno NE kolidira s dinamičkom
+`/api/vehicles/[id]/...` (Next.js App Router prioritizira statičke segmente
+- već dokazano u ovom repou kroz `/vehicles/import`/`/vehicles/new` koji
+koegzistiraju s `/vehicles/[id]`).
+
+**3) UI.** Novi "Statistika" tab na `/vehicles/[id]` (6. tab) - date-range
+selektor (isti `<input type="date">` obrazac kao "Ugovori" tab), badge boja
++ brojevi (dana pod ugovorom/slobodno, prihod, trošak servisa, profit),
+učitava se SAMO kad je tab stvarno aktivan (za razliku od contracts/service
+koji se učitavaju odmah - ovaj ovisi o promjenjivom rasponu, nema smisla
+pucati request prije nego ga korisnik pogleda). Nova `/vehicles/stats`
+stranica (cijela flota) - isti date-range selektor, tablica SORTIRANA PO
+PROFITU OPADAJUĆE (korisnikov eksplicitan zahtjev), spaja `/api/vehicles`
+(marka/model/tablice) i `/api/vehicles/stats` (brojevi) po `vehicleId` na
+klijentu - stats DTO namjerno ne nosi vehicle detalje, drži se fokusiran.
+Link "Statistika flote" dodan u `/vehicles` toolbar (uz postojeći CSV uvoz
+gumb), NE u glavni topnav (statistika je pod-pogled vozila, ne vlastita
+top-level sekcija, isti rezon kao CSV import prije).
+
+**Verifikacija.** `tsc --noEmit` čist na sva tri paketa, `next build` čist
+(nove rute `/api/vehicles/[id]/stats`, `/api/vehicles/stats`,
+`/vehicles/stats` vidljive). **Stvaran dvodijelni test protiv produkcijske
+baze** (privremena debug ruta bez auth-a, imenovana bez `_` prefiksa):
+**Dio A - READ-ONLY protiv STVARNIH produkcijskih podataka** (korisnikov
+eksplicitan zahtjev "uzmi vozilo sa stvarnim ugovorima... read-only, bez
+izmjena") - nađeno prvo vozilo sa signed ugovorom (8 ugovora), NEOVISNO
+ručno izračunat broj dana/prihod/trošak (namjerno odvojen kod od
+`vehicleStats.ts`, ne poziva istu funkciju dvaput) uspoređen s
+`getVehicleStats` rezultatom - sva tri broja (dana=14, prihod=0 - stariji
+ugovori nemaju `pricePerDay`, trošak=0) TOČNO se poklapaju. **Dio B - status
+pragovi** (fabricirani test podaci, obrisani nakon): `no_activity` za
+vozilo bez ičega, `good` za 100% iskorištenost s pozitivnim profitom, `ok`
+za 30% iskorištenost s pozitivnim profitom, zatim **na ISTOM vozilu** dodan
+servisni trošak (1000 EUR) koji obrne profit u negativan → status se
+ispravno promijenio `ok` → `bad` (točno korisnikov test scenarij "provjeri
+da se boja mijenja kad promijeniš servisni trošak"), i poseban test za
+prijevremeno zatvoren ugovor (`dateTo` daleko u budućnosti, `actualEndDate`
+5 dana od početka) - `rentedDays`/`revenue` ispravno stali na
+`actualEndDate` (5 dana, 250 EUR), NE nastavili do originalnog `dateTo`.
+Test podaci (4 vozila, ugovori, 1 dijeljeni test klijent) obrisani u
+`finally` bloku, **eksplicitno potvrđeno upitom nad produkcijskom bazom**
+(sva tri brojača `0`). Debug ruta uklonjena (`git status` potvrđuje čist
+diff). Nije testirano kroz pravi owner login klik u browseru (magic-link
+auth) - isti razlog kao svugdje ranije u ovom logu.
+
+---
+
+**Prijašnji dio (dvadesetšesti nastavak)** - korisnik zatražio
 punu servisnu knjižicu (web) - dosad je bio samo "uskoro" placeholder tab.
 
 **1) Novi `ServiceRecord` model.** `vehicleId` (FK, `onDelete: Cascade` -
