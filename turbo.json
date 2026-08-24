@@ -4,7 +4,38 @@
   "tasks": {
     "build": {
       "dependsOn": ["^build"],
-      "outputs": [".next/**", "!.next/cache/**", "dist/**"]
+      "outputs": [".next/**", "!.next/cache/**", "dist/**"],
+      "env": [
+        "DATABASE_URL",
+        "DIRECT_URL",
+        "NEXT_PUBLIC_SUPABASE_URL",
+        "NEXT_PUBLIC_SUPABASE_ANON_KEY",
+        "SUPABASE_SERVICE_ROLE_KEY",
+        "HETZNER_S3_ENDPOINT",
+        "HETZNER_S3_REGION",
+        "HETZNER_S3_BUCKET",
+        "HETZNER_S3_ACCESS_KEY_ID",
+        "HETZNER_S3_SECRET_ACCESS_KEY",
+        "RESEND_API_KEY",
+        "RESEND_FROM_EMAIL",
+        "OWNER_EMAIL",
+        "GOOGLE_VISION_API_KEY",
+        "COMPANY_NAME",
+        "COMPANY_ADDRESS",
+        "COMPANY_OIB",
+        "COMPANY_PHONE",
+        "COMPANY_EMAIL",
+        "SIGNING_TOKEN_SECRET",
+        "CRON_SECRET",
+        "NEXT_PUBLIC_OWNER_APP_URL",
+        "NEXT_PUBLIC_CLIENT_SIGNING_BASE_URL",
+        "MOBILE_APP_SCHEME"
+      ]
+    },
+    "@rent-a-car/api#build": {
+      "dependsOn": ["^build"],
+      "outputs": [],
+      "env": ["DATABASE_URL", "DIRECT_URL"]
     },
     "dev": {
       "cache": false,
