@@ -5,6 +5,7 @@ export { prisma } from "../db/client";
 export * from "./vehicles";
 export * from "./companySettings";
 export * from "./employees";
+export * from "./terms";
 export * from "./clients";
 export * from "./contracts";
 export * from "./signing";

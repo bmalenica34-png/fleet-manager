@@ -4,7 +4,109 @@ Dinamički log stanja projekta. Ažurira se na kraju svake sesije. Za statičnu
 arhitekturu/konvencije vidi [CLAUDE.md](CLAUDE.md) — ovaj dokument je "što je
 gotovo i zašto", ne "kako treba izgledati".
 
-**Zadnje ažurirano:** 2026-08-24, dvadeseti nastavak - korisnik zatražio
+**Zadnje ažurirano:** 2026-08-24, dvadesetprvi nastavak - korisnik zatražio
+versionirane uvjete korištenja (T&C) s uređivanjem u postavkama i pravim PDF
+prilogom uz svaki potpisan ugovor. Prije početka provjereno gdje uvjeti
+trenutno žive (korisnikov eksplicitan zahtjev): hardkodirani
+`TERMS_VERSION`/`TERMS_TEXT` konstanti direktno u `sign/[token]/page.tsx`
+(8 paragrafa placeholder pravnog teksta), `Contract.termsVersion` je bio
+slobodan STRING koji je KLIJENT sam slao na submit (netočno "kod servera
+ništa ne provjerava koju verziju je klijent stvarno vidio").
+
+**Novi `TermsAndConditions` model** (versioned, `content` plain text -
+paragrafi odvojeni praznim retkom, isti format kao stari TERMS_TEXT,
+namjerno NE markdown/rich text - nema XSS rizika jer se nikad ne renderira
+kao HTML, lako se uređuje u textarei i renderira u PDF bez parsera).
+`active` boolean - točno jedan red je aktivan, održava se ISKLJUČIVO u
+`createTermsVersion()` (transakcija: stari active→false, novi red→true),
+namjerno bez DB-level partial unique indexa (jedino mjesto koje piše u
+tablicu je ta funkcija - "trust internal code" konvencija). Stare verzije
+se NIKAD ne brišu/mijenjaju - pravna dokaznost.
+
+**Migracija seed-a v1 = TOČNO stari hardkodirani TERMS_TEXT** (copy-paste,
+ne parafrazirano) - garantira kontinuitet, svaki već otvoren signing link
+nakon deploya i dalje vidi identičan tekst. Ručno napisana migracija (isti
+razlog kao prijašnja tri nastavka - shadow-DB replay pada na pre-postojećoj
+migraciji), `prisma migrate deploy` izravno na produkcijsku bazu.
+
+**Contract.termsVersionId** (nullable FK na TermsAndConditions) + **
+Contract.termsPdfKey** (S3 key generiranog PDF snapshot-a). Stari
+`Contract.termsVersion` (string) ZADRŽAN (ne uklonjen) - i dalje se
+postavlja, ali sad IZVEDEN server-side iz `String(TermsAndConditions.version)`,
+ne više iz klijentskog inputa - postojeći "(verzija X)" prikaz na
+ContractPdf-u nije trebao izmjenu.
+
+**Server nikad ne vjeruje klijentu koju verziju je vidio.** `GET /api/sign/
+[token]` sad vraća `terms: {id, version, content}` (aktivna verzija u
+trenutku resolvea) - signing wizard renderira TAJ sadržaj (uklonjen
+hardkodirani TERMS_TEXT), i na finalni submit šalje natrag TOČNO taj
+`terms.id` kao `termsId` (zamijenio stari slobodni `termsVersion` string u
+`completeSigningRequestSchema`). `completeSigning` server-side resolvea
+`TermsAndConditions` po tom id-u (odbija s `invalid_terms` ako ne postoji -
+verzije se nikad ne brišu, pa nepostojeći id znači neispravan klijentski
+zahtjev, ne "stara ali legitimna verzija") i sprema i `termsVersionId` i
+izvedeni `termsVersion` string.
+
+**PDF privitak.** Novi `TermsPdf.tsx` (zaseban jednostavan generator, isti
+`styles.ts`/font infrastruktura kao ContractPdf, ne dio njega - sadržaj
+varira u duljini i logički je zaseban dokument). `finalizeContractDocuments`
+(`documents.ts`) generira ga iz `contract.termsAndConditions` (uključena
+relacija) SAMO ako postoji (null za ugovore potpisane prije ovog polja -
+graceful skip, ne baca), uploada uz ostale dokumente
+(`contracts/{id}/documents/uvjeti-najma.pdf`), sprema `termsPdfKey`, dodaje
+kao treći mail privitak (`lib/email.ts`-ov `sendSignedContractDocumentsEmail`
+prošireno opcionalnim `termsPdf` parametrom). `ContractListItemDTO`
+(`contracts.ts`) prošireno `termsPdfUrl` (presigned, isti obrazac kao
+contractPdfUrl/protocolPdfUrl) - link "uvjeti" dodan uz postojeće "ugovor /
+zapisnik" linkove na owner `/contracts` I client-facing `/portal` stranici
+(korisnikov eksplicitan zahtjev "dohvatljiv i owneru i klijentu"). Vehicle
+detail "Ugovori" tab NAMJERNO nije dirana (već ne prikazuje ni
+protocolPdfUrl, lakši summary prikaz - dodavanje treće poveznice ovdje
+procijenjeno kao nepotreban scope za ovaj zahtjev).
+
+**UI (`/settings`).** Novi `TermsSection.tsx` (dodan uz postojeći
+`SettingsForm`/logo blok, isti "settings" permission gate) - prikaz
+trenutno aktivne verzije (broj + datum preko novog `formatDateTimeHr`
+helpera, dodan u `lib/dateFormat.ts` jer nije postojao dijeljeni klijentski
+datum+vrijeme formatter), textarea predispunjen aktivnim sadržajem, gumb
+"Spremi novu verziju" (disabled dok se sadržaj ne promijeni ILI je prazan),
+eksplicitna napomena da vrijedi SAMO za buduće ugovore. Povijest verzija
+kao expand/collapse lista (broj, datum, "(aktivna)" oznaka, sadržaj na
+klik). Novа `POST /api/terms` (`requireModulePermission(request,
+"settings")`, isti modul kao ostale postavke tvrtke).
+
+**Verifikacija.** `tsc --noEmit` čist na sva tri paketa, `next build` čist
+(`/api/terms` ruta vidljiva, `/sign/[token]` bundle SMANJEN 8.01→7.01 kB -
+uklonjen veliki hardkodirani TERMS_TEXT string, `/settings` narastao
+1.62→4.89 kB za novu sekciju). **Stvaran end-to-end test protiv
+produkcijske baze** (privremena debug ruta, isti obrazac kao prijašnja tri
+nastavka) - NAMJERNO zaobišao stvarno slanje mailova
+(`finalizeContractDocuments`/`completeSigning` bi mailao pravi produkcijski
+`OWNER_EMAIL` za fabricirane test ugovore, neželjen sporedni efekt), umjesto
+toga direktno testiran terms-specifičan mehanizam: `createTermsVersion`
+kreirao v2 (test sadržaj) → potvrđeno stari v1 postaje `active:false`, v2
+`active:true`, v1 sadržaj NEPROMIJENJEN. Dva fabricirana test ugovora - A
+(`termsVersionId` = novi v2) i B (`termsVersionId` = originalni v1) - svaki
+kroz PRAVI `renderTermsPdf` + `uploadObject` (stvaran Hetzner upload).
+Rezultat: ugovor A generirao PDF sa v2 (novim) tekstom, ugovor B generirao
+PDF s IZVORNIM v1 tekstom - točno korisnikov test scenarij ("stari ugovori i
+dalje pokazuju stari tekst") potvrđen izravno, bez potrebe čekati stvarno
+kronološko potpisivanje dva ugovora. Jedan generirani PDF (ugovor A, v2)
+preuzet i vizualno pregledan (Read tool) - naslov/podnaslov/sadržaj ispravno
+renderirani. Test podaci (2 ugovora, test vozilo/klijent, test terms verzija
++ S3 objekti) obrisani, v1 vraćen kao aktivna verzija. **Usput uhvaćena i
+ispravljena vlastita greška u čišćenju**: slučajni ponovni GET pozivi na
+debug rutu (dok se provjeravalo stanje) su stvorili 5 dodatnih neplaniranih
+test verzija (v3-v7, sve s test sadržajem) prije nego je vozilo unique
+constraint zaustavio daljnje stvaranje ugovora - uhvaćeno provjerom
+stvarnog DB stanja (ne pretpostavkom da je prvi cleanup bio dovoljan),
+počišćeno zasebnim jednokratnim cleanup pozivom, potvrđeno da baza sad ima
+TOČNO jedan (v1) red prije nastavka. Sve debug rute i privremeni
+`renderTermsPdf` re-export uklonjeni (`git status` potvrđuje čist diff).
+
+---
+
+**Prijašnji dio (dvadeseti nastavak)** - korisnik zatražio
 employee accounts s per-modul permisijama. Implementirano i verificirano
 protiv stvarne baze, uklj. arhitektonske odluke koje je korisnik izričito
 prepustio meni.

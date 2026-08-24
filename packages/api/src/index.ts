@@ -1,6 +1,7 @@
 export * from "./schemas/vehicle";
 export * from "./schemas/companySettings";
 export * from "./schemas/employee";
+export * from "./schemas/terms";
 export * from "./schemas/client";
 export * from "./schemas/contract";
 export * from "./schemas/handoverPhoto";

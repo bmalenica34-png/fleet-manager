@@ -96,12 +96,15 @@ export interface CompleteSigningInput {
     damagedPart?: VehiclePart;
   }[];
   signaturePngBuffer: Buffer;
-  termsVersion: string;
+  // Id TermsAndConditions retka koji je klijent stvarno vidio (vidi
+  // schemas/signing.ts komentar) - resolvea se i validira ovdje, nikad se
+  // ne vjeruje bilo kojem drugom klijentskom podatku o sadržaju/verziji.
+  termsId: string;
 }
 
 export type CompleteSigningResult =
   | { ok: true }
-  | { ok: false; error: "invalid" | "expired" | "already_signed" | "missing_angles" };
+  | { ok: false; error: "invalid" | "expired" | "already_signed" | "missing_angles" | "invalid_terms" };
 
 /**
  * Atomarno (koliko je moguće preko S3 + DB) dovršava signing flow:
@@ -122,6 +125,14 @@ export async function completeSigning(
   const missingAngles = requiredHandoverAngles.filter((angle) => !submittedAngles.has(angle));
   if (missingAngles.length > 0) {
     return { ok: false, error: "missing_angles" };
+  }
+
+  // Verzije se nikad ne brišu (vidi schema.prisma), pa ako id ne postoji to
+  // znači klijent je poslao nešto neispravno, ne "stara ali legitimna
+  // verzija" - takva bi i dalje bila pronađena ovdje.
+  const terms = await prisma.termsAndConditions.findUnique({ where: { id: input.termsId } });
+  if (!terms) {
+    return { ok: false, error: "invalid_terms" };
   }
 
   // Dokumenti i slike su već uploadani izravno u Hetzner s klijenta
@@ -166,7 +177,8 @@ export async function completeSigning(
         // Server-side timestamp (ne klijentski) - pouzdaniji zapis "kad je
         // stvarno primljeno" nego trenutak koji bi klijent mogao poslati.
         termsAcceptedAt: new Date(),
-        termsVersion: input.termsVersion,
+        termsVersion: String(terms.version),
+        termsVersionId: terms.id,
       },
     }),
   ]);

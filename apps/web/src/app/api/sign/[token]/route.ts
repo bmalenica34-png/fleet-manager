@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { completeSigning, resolveSigningContract } from "@rent-a-car/api/server";
+import { completeSigning, getActiveTerms, resolveSigningContract } from "@rent-a-car/api/server";
 import { completeSigningRequestSchema } from "@rent-a-car/api";
 
 export const runtime = "nodejs";
@@ -16,6 +16,12 @@ export async function GET(
   }
 
   const { contract } = resolution;
+
+  // Aktivna verzija uvjeta se šalje ovdje (ne hardkodirana klijentski) -
+  // wizard prikazuje ovaj sadržaj u terms koraku, i vraća isti `terms.id`
+  // natrag na submit da server zna TOČNO koju je verziju klijent vidio.
+  const terms = await getActiveTerms();
+
   return NextResponse.json({
     status: "ok",
     contract: {
@@ -34,6 +40,7 @@ export async function GET(
         phone: contract.client.phone,
       },
     },
+    terms: terms ? { id: terms.id, version: terms.version, content: terms.content } : null,
   });
 }
 
@@ -60,7 +67,7 @@ export async function POST(
   const result = await completeSigning(params.token, {
     phone: input.phone.trim(),
     address: input.address?.trim() || undefined,
-    termsVersion: input.termsVersion,
+    termsId: input.termsId,
     driverLicenseKey: input.driverLicenseKey,
     idDocumentKey: input.idDocumentKey,
     photos: [

@@ -14,6 +14,7 @@ interface ContractListItem {
   client: { firstName: string; lastName: string; email: string };
   contractPdfUrl: string | null;
   protocolPdfUrl: string | null;
+  termsPdfUrl: string | null;
   latestAnnex: { status: string; newDateTo: string } | null;
   latestPhotoRequest: { requestedAt: string; fulfilledAt: string | null } | null;
 }
@@ -115,6 +116,14 @@ export default function ContractsPage() {
                         <a href={c.protocolPdfUrl ?? undefined} target="_blank" rel="noreferrer">
                           zapisnik
                         </a>
+                        {c.termsPdfUrl && (
+                          <>
+                            {" / "}
+                            <a href={c.termsPdfUrl} target="_blank" rel="noreferrer">
+                              uvjeti
+                            </a>
+                          </>
+                        )}
                       </>
                     ) : (
                       <span className="muted">—</span>

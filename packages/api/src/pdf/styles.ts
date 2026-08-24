@@ -144,6 +144,12 @@ export const styles = StyleSheet.create({
     fontFamily: "PTSans",
     fontWeight: "bold",
   },
+  paragraph: {
+    fontSize: 9,
+    color: "#1a1a1a",
+    marginBottom: 8,
+    lineHeight: 1.4,
+  },
   termsLine: {
     fontSize: 8,
     color: "#444444",

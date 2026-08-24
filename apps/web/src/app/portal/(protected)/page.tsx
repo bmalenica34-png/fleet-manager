@@ -63,6 +63,14 @@ export default async function PortalPage() {
                       <a href={c.protocolPdfUrl ?? undefined} target="_blank" rel="noreferrer">
                         zapisnik
                       </a>
+                      {c.termsPdfUrl && (
+                        <>
+                          {" / "}
+                          <a href={c.termsPdfUrl} target="_blank" rel="noreferrer">
+                            uvjeti
+                          </a>
+                        </>
+                      )}
                     </>
                   ) : (
                     <span className="muted">—</span>

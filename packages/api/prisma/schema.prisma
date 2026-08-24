@@ -172,6 +172,35 @@ model CompanySettings {
 }
 
 // ---------------------------------------------------------------------------
+// TermsAndConditions
+// ---------------------------------------------------------------------------
+
+// Versioned - svaka izmjena u /settings kreira NOVI red, nikad se ne
+// overwrita/briše postojeći (potrebno za pravnu dokaznost starih ugovora -
+// koji točno tekst je klijent stvarno vidio i prihvatio). `active` označava
+// TOČNO jedan red kao trenutno važeći - to je app-level invarijanta koju
+// održava createTermsVersion() (transakcija: prethodni active -> false,
+// novi red -> true), namjerno bez DB-level partial unique indexa (jedino
+// mjesto koje piše u ovu tablicu je ta funkcija - vidi "trust internal
+// code" konvenciju, isto obrazloženje kao svugdje drugdje u ovoj shemi).
+// `content` je plain text, paragrafi odvojeni praznim retkom ("\n\n") - isti
+// format kao prijašnji hardkodirani TERMS_TEXT u sign/[token]/page.tsx,
+// namjerno NE markdown/rich text (nema XSS rizika jer se nikad ne renderira
+// kao HTML, lako se i uređuje u textarei i renderira u PDF bez parsera).
+model TermsAndConditions {
+  id      String  @id @default(cuid())
+  version Int     @default(autoincrement())
+  content String
+  active  Boolean @default(false)
+
+  createdAt DateTime @default(now())
+
+  contracts Contract[]
+
+  @@map("terms_and_conditions")
+}
+
+// ---------------------------------------------------------------------------
 // Client
 // ---------------------------------------------------------------------------
 
@@ -260,10 +289,19 @@ model Contract {
   // Prihvaćanje uvjeta najma (scroll-to-accept korak u signing wizardu,
   // prije potpisa). termsAcceptedAt postavlja SERVER u trenutku obrade
   // potpisanog submita (ne klijentski timestamp - pouzdaniji zapis "kad je
-  // stvarno primljeno"), termsVersion je verzija teksta koju je klijent
-  // vidio (za slučaj da se tekst uvjeta kasnije promijeni).
+  // stvarno primljeno"). termsVersion (string) je zadržan zbog postojećeg
+  // PDF prikaza ("verzija X") - za nove ugovore se sad izvodi iz
+  // termsVersionId (String(TermsAndConditions.version)), ne više iz
+  // klijentskog inputa. termsVersionId referencira TOČNU verziju koju je
+  // klijent vidio (server resolvea po id-u koji je vratio GET /api/sign/
+  // [token] - nikad ne vjeruje slobodnom klijentskom stringu). termsPdfKey
+  // je snapshot te verzije kao PDF, generiran i spremljen uz ostale
+  // ugovorne dokumente (vidi finalizeContractDocuments).
   termsAcceptedAt DateTime?
   termsVersion    String?
+  termsVersionId  String?
+  termsAndConditions TermsAndConditions? @relation(fields: [termsVersionId], references: [id])
+  termsPdfKey     String?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt

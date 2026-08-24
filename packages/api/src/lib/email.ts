@@ -50,19 +50,21 @@ export async function sendSignedContractDocumentsEmail(params: {
   vehicleLabel: string;
   contractPdf: Buffer;
   protocolPdf: Buffer;
+  termsPdf?: Buffer;
 }): Promise<void> {
   await sendEmail({
     to: params.to,
     subject: `Potpisan ugovor za najam vozila ${params.vehicleLabel}`,
     html: `
       <p>Poštovani/a ${params.recipientName},</p>
-      <p>U prilogu se nalazi potpisan ugovor za najam vozila <strong>${params.vehicleLabel}</strong>
-      te primopredajni zapisnik sa stanjem vozila pri preuzimanju.</p>
+      <p>U prilogu se nalazi potpisan ugovor za najam vozila <strong>${params.vehicleLabel}</strong>,
+      primopredajni zapisnik sa stanjem vozila pri preuzimanju${params.termsPdf ? ", te prihvaćeni uvjeti najma" : ""}.</p>
       <p>Hvala,<br/>Rent-a-Car Manager</p>
     `,
     attachments: [
       { filename: "ugovor.pdf", content: params.contractPdf },
       { filename: "primopredajni-zapisnik.pdf", content: params.protocolPdf },
+      ...(params.termsPdf ? [{ filename: "uvjeti-najma.pdf", content: params.termsPdf }] : []),
     ],
   });
 }

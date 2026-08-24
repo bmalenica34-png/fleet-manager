@@ -23,6 +23,17 @@ export function isoToHrDate(value: string): string {
 }
 
 /**
+ * ISO datetime (ili Date objekt) -> "DD.MM.GGGG. HH:mm" za prikaz. Isti
+ * razlog kao formatDateHr da NE koristi Intl/toLocaleString - hr-HR CLDR
+ * default ubacuje razmake ("19. 08. 2026."), korisnik eksplicitno tražio
+ * bez razmaka svugdje u appu (vidi CLAUDE.md/PROGRESS.md modul 2).
+ */
+export function formatDateTimeHr(value: string | Date): string {
+  const date = typeof value === "string" ? new Date(value) : value;
+  return `${pad2(date.getDate())}.${pad2(date.getMonth() + 1)}.${date.getFullYear()}. ${pad2(date.getHours())}:${pad2(date.getMinutes())}`;
+}
+
+/**
  * "DD.MM.GGGG." (točka na kraju opcionalna, dozvoljava i jednoznamenkaste
  * dan/mjesec) -> "GGGG-MM-DD", ili null ako format/datum nije validan
  * (npr. "31.02.2026." - 31. veljače ne postoji).

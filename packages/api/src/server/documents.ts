@@ -2,7 +2,7 @@ import type { HandoverPhoto } from "@prisma/client";
 import { prisma } from "../db/client";
 import { getPresignedDownloadUrl, uploadObject, buildObjectKey } from "../storage/hetzner";
 import { sendSignedContractDocumentsEmail } from "../lib/email";
-import { renderContractPdf, renderProtocolPdf } from "../pdf/generate";
+import { renderContractPdf, renderProtocolPdf, renderTermsPdf } from "../pdf/generate";
 import { getCompanyInfoForPdf } from "./companySettings";
 
 function getOwnerEmail(): string {
@@ -28,6 +28,7 @@ export async function finalizeContractDocuments(contractId: string): Promise<voi
       client: true,
       createdByOwner: true,
       createdByEmployee: true,
+      termsAndConditions: true,
       handoverPhotos: { where: { photoRequestId: null } },
     },
   });
@@ -112,17 +113,37 @@ export async function finalizeContractDocuments(contractId: string): Promise<voi
     }),
   ]);
 
+  // Snapshot TOČNE verzije uvjeta koju je klijent vidio (contract.termsVersionId,
+  // resolvean i validiran u completeSigning) - null samo za ugovore
+  // potpisane prije uvođenja ovog polja, ne za nove (termsId je obavezan u
+  // completeSigningRequestSchema).
+  const termsPdfBuffer = contract.termsAndConditions
+    ? await renderTermsPdf({
+        companyName: company.name || "Rent-a-Car Manager",
+        version: contract.termsAndConditions.version,
+        content: contract.termsAndConditions.content,
+        contractNumber: contract.number,
+        acceptedAt: contract.termsAcceptedAt,
+      })
+    : null;
+
   const contractPdfKey = buildObjectKey(`contracts/${contract.id}/documents`, "ugovor.pdf");
   const protocolPdfKey = buildObjectKey(`contracts/${contract.id}/documents`, "zapisnik.pdf");
+  const termsPdfKey = termsPdfBuffer
+    ? buildObjectKey(`contracts/${contract.id}/documents`, "uvjeti-najma.pdf")
+    : null;
 
   await Promise.all([
     uploadObject({ key: contractPdfKey, body: contractPdfBuffer, contentType: "application/pdf" }),
     uploadObject({ key: protocolPdfKey, body: protocolPdfBuffer, contentType: "application/pdf" }),
+    termsPdfKey && termsPdfBuffer
+      ? uploadObject({ key: termsPdfKey, body: termsPdfBuffer, contentType: "application/pdf" })
+      : Promise.resolve(),
   ]);
 
   await prisma.contract.update({
     where: { id: contract.id },
-    data: { contractPdfKey, protocolPdfKey },
+    data: { contractPdfKey, protocolPdfKey, termsPdfKey },
   });
 
   const vehicleLabel = `${contract.vehicle.make} ${contract.vehicle.model} (${contract.vehicle.licensePlate})`;
@@ -134,6 +155,7 @@ export async function finalizeContractDocuments(contractId: string): Promise<voi
       vehicleLabel,
       contractPdf: contractPdfBuffer,
       protocolPdf: protocolPdfBuffer,
+      termsPdf: termsPdfBuffer ?? undefined,
     }),
     sendSignedContractDocumentsEmail({
       to: getOwnerEmail(),
@@ -141,6 +163,7 @@ export async function finalizeContractDocuments(contractId: string): Promise<voi
       vehicleLabel,
       contractPdf: contractPdfBuffer,
       protocolPdf: protocolPdfBuffer,
+      termsPdf: termsPdfBuffer ?? undefined,
     }),
   ]);
 }

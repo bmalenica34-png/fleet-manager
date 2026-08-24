@@ -70,13 +70,16 @@ export async function getContract(id: string): Promise<ContractWithRelations | n
 export type ContractListItemDTO = ContractWithRelations & {
   contractPdfUrl: string | null;
   protocolPdfUrl: string | null;
+  termsPdfUrl: string | null;
   latestAnnex: ContractAnnexSummary | null;
   latestPhotoRequest: ContractPhotoRequestSummary | null;
 };
 
-async function withDocumentUrls<T extends { contractPdfKey: string | null; protocolPdfKey: string | null }>(
+async function withDocumentUrls<
+  T extends { contractPdfKey: string | null; protocolPdfKey: string | null; termsPdfKey: string | null }
+>(
   contract: T
-): Promise<T & { contractPdfUrl: string | null; protocolPdfUrl: string | null }> {
+): Promise<T & { contractPdfUrl: string | null; protocolPdfUrl: string | null; termsPdfUrl: string | null }> {
   return {
     ...contract,
     contractPdfUrl: contract.contractPdfKey
@@ -85,6 +88,7 @@ async function withDocumentUrls<T extends { contractPdfKey: string | null; proto
     protocolPdfUrl: contract.protocolPdfKey
       ? await getPresignedDownloadUrl(contract.protocolPdfKey)
       : null,
+    termsPdfUrl: contract.termsPdfKey ? await getPresignedDownloadUrl(contract.termsPdfKey) : null,
   };
 }
 

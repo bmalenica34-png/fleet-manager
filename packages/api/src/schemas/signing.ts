@@ -37,7 +37,10 @@ export const completeSigningRequestSchema = z.object({
   phone: z.string().min(1),
   address: z.string().min(1).optional(),
   termsAccepted: z.literal(true),
-  termsVersion: z.string().min(1),
+  // Id TermsAndConditions retka koji je klijent stvarno vidio (dobiven iz
+  // GET /api/sign/[token] resolve odgovora) - NE slobodan string koji
+  // klijent sam odredi, server ga resolvea i validira u completeSigning.
+  termsId: z.string().min(1),
   driverLicenseKey: z.string().min(1),
   idDocumentKey: z.string().min(1),
   photos: z.array(signPhotoSchema),

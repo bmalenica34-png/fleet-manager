@@ -50,35 +50,6 @@ const VEHICLE_PART_LABELS: Record<VehiclePart, string> = {
 };
 const VEHICLE_PART_OPTIONS = Object.keys(VEHICLE_PART_LABELS) as VehiclePart[];
 
-// Placeholder tekst - zamijeniti pravim pravnim tekstom kad stigne. Kad se
-// zamijeni, TERMS_VERSION MORA se promijeniti (npr. "v2") - to je vrijednost
-// koja se sprema uz svaki potpisan ugovor (Contract.termsVersion), da se
-// zna točno koju verziju je konkretni klijent vidio i prihvatio.
-const TERMS_VERSION = "placeholder-v1";
-const TERMS_TEXT = `1. Predmet ugovora
-Ovim Uvjetima najma uređuju se prava i obveze najmodavca i najmoprimca u vezi s najmom vozila opisanog u ugovoru. Potpisom ugovora najmoprimac potvrđuje da je pročitao, razumio i prihvatio ove uvjete u cijelosti.
-
-2. Korištenje vozila
-Vozilo smije upravljati isključivo osoba navedena kao najmoprimac (ili dodatni vozač naveden u ugovoru), koja posjeduje važeću vozačku dozvolu odgovarajuće kategorije. Vozilo se ne smije koristiti za prijevoz osoba ili stvari uz naknadu, sudjelovanje u utrkama ili testiranjima, vuču drugih vozila, ili bilo koju drugu svrhu suprotnu njegovoj namjeni.
-
-3. Stanje vozila i primopredaja
-Najmoprimac potvrđuje da je vozilo preuzeo u ispravnom stanju, bez vidljivih oštećenja osim onih izričito navedenih u primopredajnom zapisniku i pripadajućim fotografijama. Najmoprimac je dužan vratiti vozilo u istom stanju, uz uobičajeno trošenje, na dogovorenom mjestu i u dogovoreno vrijeme.
-
-4. Gorivo
-Vozilo se predaje s određenom količinom goriva i mora se vratiti s istom količinom, osim ako je drugačije dogovoreno. U protivnom, najmodavac zadržava pravo naplate razlike goriva uvećane za trošak usluge točenja.
-
-5. Odgovornost za štetu
-Najmoprimac odgovara za svu štetu nastalu na vozilu tijekom trajanja najma, do iznosa učešća u šteti navedenog u ugovoru, osim ako je šteta nastala krivnjom treće strane uz uredno prijavljen policijski zapisnik. U slučaju prometne nezgode, najmoprimac je obavezan odmah obavijestiti policiju i najmodavca.
-
-6. Produženje najma
-Svako produženje razdoblja najma mora biti unaprijed dogovoreno s najmodavcem i potvrđeno pisanim putem (aneksom ugovora). Neovlašteno zadržavanje vozila nakon isteka ugovorenog razdoblja smatra se kršenjem ugovora.
-
-7. Obrada osobnih podataka
-Najmodavac obrađuje osobne podatke najmoprimca isključivo u svrhu izvršenja ovog ugovora, sukladno važećim propisima o zaštiti osobnih podataka, te ih ne ustupa trećim stranama osim kada je to zakonski obvezno.
-
-8. Završne odredbe
-Za sve što nije uređeno ovim uvjetima primjenjuju se odredbe Zakona o obveznim odnosima i drugih važećih propisa Republike Hrvatske. Eventualni sporovi rješavaju se sporazumno, a u slučaju spora nadležan je sud prema sjedištu najmodavca.`;
-
 type Step = "documents" | "photos" | "terms" | "signature" | "review";
 const STEPS: Step[] = ["documents", "photos", "terms", "signature", "review"];
 
@@ -88,6 +59,15 @@ interface ContractSummary {
   dateTo: string;
   vehicle: { make: string; model: string; licensePlate: string };
   client: { firstName: string; lastName: string; email: string; phone: string };
+}
+
+// Aktivna verzija uvjeta najma, dobivena s servera (GET /api/sign/[token]) -
+// NE hardkodirano, vidi packages/api/src/schemas/terms.ts i /settings
+// stranicu gdje owner uređuje sadržaj.
+interface ActiveTerms {
+  id: string;
+  version: number;
+  content: string;
 }
 
 interface FilePreview {
@@ -127,6 +107,7 @@ export default function SigningWizardPage() {
   const [loadState, setLoadState] = useState<"loading" | "ready" | "error">("loading");
   const [errorReason, setErrorReason] = useState<string | null>(null);
   const [contract, setContract] = useState<ContractSummary | null>(null);
+  const [terms, setTerms] = useState<ActiveTerms | null>(null);
 
   const [step, setStep] = useState<Step>("documents");
 
@@ -170,6 +151,7 @@ export default function SigningWizardPage() {
           return;
         }
         setContract(body.contract);
+        setTerms(body.terms);
         setPhone(body.contract.client.phone);
         setLoadState("ready");
       })
@@ -400,6 +382,10 @@ export default function SigningWizardPage() {
       setSubmitError("Potpis je obavezan.");
       return;
     }
+    if (!terms) {
+      setSubmitError("Uvjeti najma trenutno nisu dostupni. Osvježi stranicu i pokušaj ponovno.");
+      return;
+    }
 
     setSubmitting(true);
     setSubmitError(null);
@@ -428,7 +414,7 @@ export default function SigningWizardPage() {
         phone: phone.trim(),
         address: address.trim() || undefined,
         termsAccepted: true,
-        termsVersion: TERMS_VERSION,
+        termsId: terms.id,
         driverLicenseKey: driverLicense.key,
         idDocumentKey: idDocument.key,
         photos,
@@ -645,11 +631,15 @@ export default function SigningWizardPage() {
             <h2>Uvjeti najma</h2>
             <p className="muted">Pročitaj uvjete do kraja prije nego ih možeš prihvatiti.</p>
             <div className="terms-box" onScroll={handleTermsScroll}>
-              {TERMS_TEXT.split("\n\n").map((paragraph, i) => (
-                <p key={i} style={{ marginBottom: "0.75rem", whiteSpace: "pre-line" }}>
-                  {paragraph}
-                </p>
-              ))}
+              {terms ? (
+                terms.content.split("\n\n").map((paragraph, i) => (
+                  <p key={i} style={{ marginBottom: "0.75rem", whiteSpace: "pre-line" }}>
+                    {paragraph}
+                  </p>
+                ))
+              ) : (
+                <p className="error">Uvjeti najma trenutno nisu dostupni.</p>
+              )}
             </div>
             <label style={{ flexDirection: "row", alignItems: "center", gap: "0.5rem", marginTop: "0.75rem" }}>
               <input
