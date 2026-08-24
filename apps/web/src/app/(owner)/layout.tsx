@@ -31,6 +31,7 @@ export default async function OwnerLayout({
           <a href="/vehicles">Vozila</a>
           <a href="/clients">Klijenti</a>
           <a href="/contracts">Ugovori</a>
+          <a href="/settings">Postavke</a>
           <form action="/api/auth/logout" method="POST" style={{ display: "inline" }}>
             <button type="submit" className="btn">
               Odjava

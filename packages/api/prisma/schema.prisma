@@ -71,7 +71,36 @@ model Owner {
 
   createdAt DateTime @default(now())
 
+  createdContracts Contract[]
+
   @@map("owners")
+}
+
+// ---------------------------------------------------------------------------
+// CompanySettings
+// ---------------------------------------------------------------------------
+
+// Singleton (jedan fiksni red, id uvijek "singleton") - app je single-tenant
+// (jedna rent-a-car tvrtka spram cijele baze, vidi CLAUDE.md), pa nema
+// potrebe za FK na Owner/tenantId. Prikazuje se u zaglavlju i potpisnom
+// bloku generiranog Contract PDF-a (packages/api/src/pdf/ContractPdf.tsx).
+model CompanySettings {
+  id      String  @id @default("singleton")
+  name    String?
+  oib     String?
+  address String?
+  phone   String?
+  email   String?
+  logoKey String? // S3 key na Hetzneru, ne raw URL - vidi konvenciju za *Key polja niže
+
+  // Rezervirano za budući kvalificirani/digitalni certifikat potpisa -
+  // NIJE implementirano (potpisni blok je trenutno čisto tekstualni), ovo
+  // polje samo osigurava da ga se kasnije može dodati bez izmjene sheme.
+  digitalCertificateKey String?
+
+  updatedAt DateTime @updatedAt
+
+  @@map("company_settings")
 }
 
 // ---------------------------------------------------------------------------
@@ -123,6 +152,13 @@ model Contract {
   dateFrom  DateTime
   dateTo    DateTime
   status    ContractStatus @default(draft)
+
+  // Owner/employee account koji je izdao ugovor - za potpisni blok na PDF-u
+  // ("Za {firma}: {ime izdavatelja}"). Nullable jer postojeći ugovori
+  // (kreirani prije ovog polja) nemaju taj podatak i ne mogu se retroaktivno
+  // popuniti.
+  createdByOwnerId String?
+  createdByOwner   Owner?  @relation(fields: [createdByOwnerId], references: [id])
 
   // Jednokratan JWT signing token, 48h expiry, invalidira se odmah nakon potpisa.
   signingToken           String?   @unique

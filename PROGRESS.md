@@ -4,7 +4,81 @@ Dinamički log stanja projekta. Ažurira se na kraju svake sesije. Za statičnu
 arhitekturu/konvencije vidi [CLAUDE.md](CLAUDE.md) — ovaj dokument je "što je
 gotovo i zašto", ne "kako treba izgledati".
 
-**Zadnje ažurirano:** 2026-08-24, osamnaesti nastavak - korisnik potvrdio
+**Zadnje ažurirano:** 2026-08-24, devetnaesti nastavak - korisnik zatražio dva
+povezana feature-a: (1) Settings stranica za podatke tvrtke + logo, (2)
+tekstualni potpisni blok "s naše strane" na Contract PDF-u. Oboje
+implementirano, novom migracijom primijenjenom protiv produkcijske baze.
+
+**1) Settings (`/settings`, novi `CompanySettings` model).** Singleton red
+(fiksni `id: "singleton"`, `upsert` svugdje - owner ne mora ništa
+inicijalizirati prije prvog posjeta): `name`/`oib`/`address`/`phone`/`email`
+(svi nullable) + `logoKey` (S3 key, ista *Key konvencija kao svugdje drugdje)
++ `digitalCertificateKey` (nullable, REZERVIRANO - eksplicitan korisnikov
+zahtjev "ostavi mjesta u shemi", NIJE implementirano, samo osigurava da
+buduća nadogradnja ne zahtijeva izmjenu sheme). Nova `/settings` stranica
+(dodan link u owner nav) - forma za podatke tvrtke (PATCH `/api/settings`) +
+odvojen staged-preview logo upload blok (isti obrazac kao prometna/polica na
+vozilu - lokalni preview odmah, upload tek na "Spremi logo" klik, POST
+`/api/settings/logo`) + placeholder kartica "Digitalni certifikat - uskoro"
+(ista konvencija kao "Servisna knjižica" placeholder na vozilu). Ovo
+ZAMJENJUJE prijašnji `COMPANY_*` env-var izvor za PDF zaglavlje
+(`documents.ts`-ov `getCompanyInfo()`) - potvrđeno da te env varijable nikad
+nisu bile postavljene ni lokalno ni na Vercelu (`vercel env ls production`),
+pa nema podataka za migrirati, čist cutover na DB.
+
+**2) Tekstualni potpisni blok "Za {firma}: {izdavatelj}, {datum/vrijeme}"
+na Contract PDF-u.** Novo `Contract.createdByOwnerId` (nullable FK na
+`Owner`, ne popunjava se retroaktivno za postojeće ugovore - nema pouzdanog
+načina odrediti tko ih je kreirao). `POST /api/contracts` sad prosljeđuje
+`auth.owner.id` u `createContractAndSendSigningEmail` - budući da i mobile
+kreira ugovore kroz ISTU tu web API rutu (potvrđeno, nema zasebne mobile
+rute), izdavatelj se bilježi identično neovisno o tome je li ugovor kreiran
+na webu ili mobileu. Timestamp bloka je `Contract.signedAt` (isti event kao
+klijentov potpis, server-side, NE trenutak kreiranja ugovora - točno kako je
+korisnik tražio). `finalizeContractDocuments` (`documents.ts`) sad `include`-a
+`createdByOwner` i čita `getCompanyInfoForPdf()` (logo URL + tekstualni
+podaci) umjesto starih env-var funkcija, prosljeđuje oboje u
+`renderContractPdf`. `ContractPdf.tsx`: logo (`company.logoUrl`, ako postoji)
+prikazan u gornjem lijevom kutu zaglavlja pored naziva tvrtke (nova
+`companyHeaderRow`/`logo` stilska pravila), potpisni blok lijevo od
+klijentovog potpisa sad prikazuje ime izdavatelja + `formatDateTime(signedAt)`
+ispod naslova "Za {firma}" kad je `createdByOwner` poznat (fallback na stari
+"samo datum" prikaz za ugovore bez zabilježenog izdavatelja). Budući da je
+PDF generator jedinstven (`packages/api/src/pdf/`, korišten isključivo kroz
+server-side `finalizeContractDocuments`), promjena vrijedi identično za
+ugovore kreirane s weba i mobilea - nema odvojenog mobile PDF generatora.
+
+**Verifikacija.** `tsc --noEmit` čist na sva tri paketa (web/mobile/api),
+`next build` čist (nove rute `/settings`, `/api/settings`,
+`/api/settings/logo` vidljive u outputu). Migracija ručno napisana (ne
+`prisma migrate dev` - shadow-DB replay pada na PRE-POSTOJEĆOJ migraciji
+`20260820073000_add_contract_number`, `setval` s 0 izvan raspona na praznoj
+shadow bazi, nepovezano s ovom promjenom) i primijenjena `prisma migrate
+deploy` (bez shadow baze) izravno na produkcijsku bazu, potvrđeno "All
+migrations have been successfully applied". **Stvaran end-to-end test PDF
+renderiranja** (privremena debug ruta bez auth-a, isti obrazac kao ranije
+sesije - vidi bug #42/#45): `renderContractPdf` pozvan s fabriciranim
+podacima + pravim `data:` URI test logom (react-pdf potvrđeno podržava
+`data:image/...;base64,...` kao `Image src`, provjereno u izvornom kodu
+`@react-pdf/image` prije oslanjanja na to), generirani PDF pregledan
+(Read tool na PDF) - logo vidljiv u kutu zaglavlja, potpisni blok prikazuje
+"Za Test Rent d.o.o." / "Branimir Malenica, 24. 08. 2026. 16:32" točno kako
+je traženo. **Stvaran end-to-end test Settings DB+Hetzner pipelinea**
+(druga privremena debug ruta): `updateCompanySettings` + `setCompanyLogo` s
+pravim malim PNG-om uploadanim na Hetzner, `getCompanySettings()` round-trip
+potvrđen (`curl` na presigned URL vratio `200`/`image/png`), test podaci
+(DB red + S3 objekt) obrisani nakon verifikacije (potvrđeno `curl` na isti
+presigned URL nakon brisanja vraća `404`). Obje debug rute i privremeni
+`renderContractPdf` re-export iz `server/index.ts` uklonjeni nakon testiranja
+(`git status` potvrđuje čist diff, bez ostataka). Nije testirano kroz pravi
+owner login klik (stvaran `/settings` UI submit) - isti razlog kao ranije u
+ovom logu (magic-link browser test ocijenjen preskupim za ovu klasu
+promjene), ali podležeća server logika koju UI poziva je izravno testirana
+stvarnim pozivima iznad.
+
+---
+
+**Prijašnji dio (osamnaesti nastavak)** - korisnik potvrdio
 (screenshot produkcije, `/vehicles/new`) da deploy fix iz sedamnaestog
 nastavka drži - stranica se učitava ispravno, dva OCR slota (vanjska/
 unutarnja prometna) rade kako treba. Uočio da polica osiguranja OCR/prefill

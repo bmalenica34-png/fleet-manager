@@ -42,7 +42,13 @@ export interface ContractPdfProps {
     oib: string;
     phone: string;
     email: string;
+    logoUrl: string | null;
   };
+  // Ime osobe koja je ugovor izdala (Contract.createdByOwner), za potpisni
+  // blok "Za {firma}". Null za ugovore bez zabilježenog izdavatelja (kreirani
+  // prije uvođenja Contract.createdByOwnerId) - blok tad prikazuje samo naziv
+  // firme i datum, bez retka s imenom.
+  issuedByName: string | null;
   signatureUrl: string;
 }
 
@@ -59,7 +65,14 @@ function diffDays(from: Date, to: Date): number {
   return Math.max(1, Math.round(ms / (1000 * 60 * 60 * 24)));
 }
 
-export function ContractPdfDocument({ contract, vehicle, client, company, signatureUrl }: ContractPdfProps) {
+export function ContractPdfDocument({
+  contract,
+  vehicle,
+  client,
+  company,
+  issuedByName,
+  signatureUrl,
+}: ContractPdfProps) {
   const days = diffDays(contract.dateFrom, contract.dateTo);
   const total = contract.pricePerDay != null ? contract.pricePerDay * days : null;
   const base = total != null ? total / (1 + VAT_RATE) : null;
@@ -69,12 +82,15 @@ export function ContractPdfDocument({ contract, vehicle, client, company, signat
     <Document>
       <Page size="A4" style={styles.page}>
         <View style={styles.headerRow}>
-          <View style={styles.companyBlock}>
-            <Text style={styles.companyName}>{dash(company.name)}</Text>
-            {company.address ? <Text style={styles.companyLine}>{company.address}</Text> : null}
-            <Text style={styles.companyLine}>OIB: {dash(company.oib)}</Text>
-            <Text style={styles.companyLine}>Telefon: {dash(company.phone)}</Text>
-            <Text style={styles.companyLine}>Email: {dash(company.email)}</Text>
+          <View style={styles.companyHeaderRow}>
+            {company.logoUrl ? <Image src={company.logoUrl} style={styles.logo} /> : null}
+            <View style={styles.companyBlock}>
+              <Text style={styles.companyName}>{dash(company.name)}</Text>
+              {company.address ? <Text style={styles.companyLine}>{company.address}</Text> : null}
+              <Text style={styles.companyLine}>OIB: {dash(company.oib)}</Text>
+              <Text style={styles.companyLine}>Telefon: {dash(company.phone)}</Text>
+              <Text style={styles.companyLine}>Email: {dash(company.email)}</Text>
+            </View>
           </View>
           <View style={styles.contractNumberBox}>
             <Text style={styles.contractNumberLabel}>BROJ UGOVORA</Text>
@@ -208,7 +224,13 @@ export function ContractPdfDocument({ contract, vehicle, client, company, signat
         <View style={styles.signatureRow}>
           <View style={styles.signatureCol}>
             <Text style={styles.sectionTitle}>Za {company.name || "najmodavca"}</Text>
-            <Text style={styles.photoDamage}>{formatDate(contract.signedAt ?? contract.dateFrom)}</Text>
+            {issuedByName && contract.signedAt ? (
+              <Text style={styles.photoDamage}>
+                {issuedByName}, {formatDateTime(contract.signedAt)}
+              </Text>
+            ) : (
+              <Text style={styles.photoDamage}>{formatDate(contract.signedAt ?? contract.dateFrom)}</Text>
+            )}
           </View>
           <View style={styles.signatureCol}>
             <Text style={styles.sectionTitle}>Potpis korisnika</Text>

@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
-import { contractCreateSchema } from "@rent-a-car/api";
-import { createContractAndSendSigningEmail, listContractsWithDocumentUrls } from "@rent-a-car/api/server";
+import { companySettingsUpdateSchema } from "@rent-a-car/api";
+import { getCompanySettings, updateCompanySettings } from "@rent-a-car/api/server";
 import { zodErrorResponse } from "@/lib/handleZodError";
 import { requireOwnerSession } from "@/lib/requireOwnerSession";
 
@@ -10,17 +10,16 @@ export async function GET(request: Request) {
   const auth = await requireOwnerSession(request);
   if (!auth.authorized) return auth.response;
 
-  return NextResponse.json(await listContractsWithDocumentUrls());
+  return NextResponse.json(await getCompanySettings());
 }
 
-export async function POST(request: Request) {
+export async function PATCH(request: Request) {
   const auth = await requireOwnerSession(request);
   if (!auth.authorized) return auth.response;
 
   const body = await request.json();
-  const parsed = contractCreateSchema.safeParse(body);
+  const parsed = companySettingsUpdateSchema.safeParse(body);
   if (!parsed.success) return zodErrorResponse(parsed.error);
 
-  const contract = await createContractAndSendSigningEmail(parsed.data, auth.owner.id);
-  return NextResponse.json(contract, { status: 201 });
+  return NextResponse.json(await updateCompanySettings(parsed.data));
 }

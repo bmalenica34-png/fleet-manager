@@ -82,6 +82,16 @@ export const styles = StyleSheet.create({
     paddingBottom: 8,
     marginBottom: 8,
   },
+  companyHeaderRow: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: 8,
+  },
+  logo: {
+    width: 44,
+    height: 44,
+    objectFit: "contain",
+  },
   companyBlock: {
     maxWidth: 320,
   },

@@ -3,6 +3,7 @@ import { prisma } from "../db/client";
 import { getPresignedDownloadUrl, uploadObject, buildObjectKey } from "../storage/hetzner";
 import { sendSignedContractDocumentsEmail } from "../lib/email";
 import { renderContractPdf, renderProtocolPdf } from "../pdf/generate";
+import { getCompanyInfoForPdf } from "./companySettings";
 
 function getOwnerEmail(): string {
   const email = process.env.OWNER_EMAIL;
@@ -10,20 +11,6 @@ function getOwnerEmail(): string {
     throw new Error("Missing required env var: OWNER_EMAIL");
   }
   return email;
-}
-
-// Za zaglavlje Contract PDF-a. Za razliku od getOwnerEmail() namjerno NE
-// baca ako nedostaje - dodano naknadno (nije bio dio izvornog v1 scope-a),
-// pa ne smije srušiti postojeći signing flow ako owner još nije popunio
-// ove env varijable. PDF template prikazuje prazno/"—" za nepopunjena polja.
-function getCompanyInfo() {
-  return {
-    name: process.env.COMPANY_NAME ?? "",
-    address: process.env.COMPANY_ADDRESS ?? "",
-    oib: process.env.COMPANY_OIB ?? "",
-    phone: process.env.COMPANY_PHONE ?? "",
-    email: process.env.COMPANY_EMAIL ?? process.env.OWNER_EMAIL ?? "",
-  };
 }
 
 /**
@@ -39,6 +26,7 @@ export async function finalizeContractDocuments(contractId: string): Promise<voi
     include: {
       vehicle: true,
       client: true,
+      createdByOwner: true,
       handoverPhotos: { where: { photoRequestId: null } },
     },
   });
@@ -47,7 +35,7 @@ export async function finalizeContractDocuments(contractId: string): Promise<voi
     throw new Error(`Contract ${contractId} has no signatureKey - not signed yet`);
   }
 
-  const [signatureUrl, photoUrls] = await Promise.all([
+  const [signatureUrl, photoUrls, company] = await Promise.all([
     getPresignedDownloadUrl(contract.signatureKey, 3600),
     Promise.all(
       contract.handoverPhotos.map(async (photo: HandoverPhoto) => ({
@@ -58,7 +46,13 @@ export async function finalizeContractDocuments(contractId: string): Promise<voi
         damagedPart: photo.damagedPart,
       }))
     ),
+    getCompanyInfoForPdf(),
   ]);
+
+  // Ime izdavatelja u potpisnom bloku - vlasnik/employee koji je kreirao
+  // ugovor (Contract.createdByOwnerId). Null za ugovore kreirane prije nego
+  // je ovo polje uvedeno - ContractPdf tada jednostavno preskače tu liniju.
+  const issuedByName = contract.createdByOwner?.name ?? contract.createdByOwner?.email ?? null;
 
   const [contractPdfBuffer, protocolPdfBuffer] = await Promise.all([
     renderContractPdf({
@@ -93,7 +87,8 @@ export async function finalizeContractDocuments(contractId: string): Promise<voi
         phone: contract.client.phone,
         address: contract.client.address,
       },
-      company: getCompanyInfo(),
+      company,
+      issuedByName,
       signatureUrl,
     }),
     renderProtocolPdf({

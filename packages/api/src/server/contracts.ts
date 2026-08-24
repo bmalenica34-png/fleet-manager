@@ -130,7 +130,8 @@ export async function listContractsForClientUser(userId: string): Promise<Contra
  * nakon što je mail uspješno poslan.
  */
 export async function createContractAndSendSigningEmail(
-  input: ContractCreateInput
+  input: ContractCreateInput,
+  createdByOwnerId?: string
 ): Promise<ContractWithRelations> {
   const [vehicle, client] = await Promise.all([
     prisma.vehicle.findUniqueOrThrow({ where: { id: input.vehicleId } }),
@@ -151,6 +152,7 @@ export async function createContractAndSendSigningEmail(
       pricePerDay: input.pricePerDay,
       excessAmount: input.excessAmount,
       paymentMethod: input.paymentMethod,
+      createdByOwnerId,
     },
   });
 
