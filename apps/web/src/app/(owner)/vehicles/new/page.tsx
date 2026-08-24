@@ -19,6 +19,7 @@ export default function NewVehiclePage() {
   const [year, setYear] = useState("");
   const [licensePlate, setLicensePlate] = useState("");
   const [vin, setVin] = useState("");
+  const [registrationExpiresAt, setRegistrationExpiresAt] = useState("");
 
   // OCR prefill - skenira prometnu PRIJE spremanja vozila (vozilo još ne
   // postoji, pa se ovdje ništa ne uploada na Hetzner, samo šalje na
@@ -36,6 +37,15 @@ export default function NewVehiclePage() {
   const [innerOcrLoading, setInnerOcrLoading] = useState(false);
   const [innerOcrError, setInnerOcrError] = useState<string | null>(null);
   const [innerOcrNotice, setInnerOcrNotice] = useState<string | null>(null);
+
+  // Polica osiguranja - PDF text-parsing (ne Vision OCR), isti endpoint kao
+  // edit ekran. Vozilo još ne postoji pa se ovdje ništa ne uploada trajno,
+  // samo prefila datum isteka registracije (procjena iz isteka osiguranja)/
+  // tablice/VIN - stvaran upload police ide na edit ekranu nakon spremanja.
+  const [insuranceOcrFile, setInsuranceOcrFile] = useState<File | null>(null);
+  const [insuranceOcrLoading, setInsuranceOcrLoading] = useState(false);
+  const [insuranceOcrError, setInsuranceOcrError] = useState<string | null>(null);
+  const [insuranceOcrNotice, setInsuranceOcrNotice] = useState<string | null>(null);
 
   const isCustomMake = make === OTHER_VEHICLE_OPTION;
   const isCustomModel = isCustomMake || model === OTHER_VEHICLE_OPTION;
@@ -61,9 +71,6 @@ export default function NewVehiclePage() {
     }
 
     setSubmitting(true);
-
-    const formData = new FormData(event.currentTarget);
-    const registrationExpiresAt = formData.get("registrationExpiresAt");
 
     const payload = {
       make: resolvedMake,
@@ -179,6 +186,50 @@ export default function NewVehiclePage() {
     );
   }
 
+  async function handleInsuranceOcrScan() {
+    if (!insuranceOcrFile) return;
+    setInsuranceOcrLoading(true);
+    setInsuranceOcrError(null);
+    setInsuranceOcrNotice(null);
+
+    const formData = new FormData();
+    formData.append("file", insuranceOcrFile);
+    const res = await fetch("/api/ocr/insurance-policy", { method: "POST", body: formData });
+
+    setInsuranceOcrLoading(false);
+    if (!res.ok) {
+      const body = await res.json().catch(() => null);
+      setInsuranceOcrError(
+        body?.error === "pdf_required"
+          ? "Ekstrakcija radi samo na PDF polici (ne na fotografiji/slici)."
+          : "Ekstrakcija nije uspjela. Podatke možeš upisati ručno."
+      );
+      return;
+    }
+
+    const result = await res.json();
+    const foundFields: string[] = [];
+
+    if (result.registrationExpiresAt) {
+      setRegistrationExpiresAt(result.registrationExpiresAt);
+      foundFields.push("istek osiguranja");
+    }
+    if (result.licensePlate) {
+      setLicensePlate(result.licensePlate);
+      foundFields.push("tablice");
+    }
+    if (result.vin) {
+      setVin(result.vin);
+      foundFields.push("VIN");
+    }
+
+    setInsuranceOcrNotice(
+      foundFields.length > 0
+        ? `Prepoznato: ${foundFields.join(", ")}. Napomena: datum isteka registracije je pretpostavljen iz isteka osiguranja (obično se poklapaju, ali provjeri). Provjeri prije spremanja.`
+        : "Ništa nije prepoznato - upiši ručno."
+    );
+  }
+
   return (
     <div>
       <h1>Novo vozilo</h1>
@@ -229,6 +280,30 @@ export default function NewVehiclePage() {
         )}
         {innerOcrError && <p className="error">{innerOcrError}</p>}
         {innerOcrNotice && <p className="muted">{innerOcrNotice}</p>}
+      </div>
+
+      <div style={{ marginBottom: "1.5rem", padding: "1rem", border: "1px solid var(--border, #ddd)", borderRadius: "8px" }}>
+        <label>
+          Skeniraj policu osiguranja (OCR, opcionalno, PDF)
+          <input
+            type="file"
+            accept="application/pdf"
+            onChange={(e) => {
+              setInsuranceOcrFile(e.target.files?.[0] ?? null);
+              setInsuranceOcrError(null);
+              setInsuranceOcrNotice(null);
+            }}
+            disabled={insuranceOcrLoading}
+          />
+        </label>
+        <p className="muted" style={{ margin: "0.25rem 0" }}>→ istek osiguranja (procjena isteka registracije), tablice, VIN</p>
+        {insuranceOcrFile && (
+          <button type="button" className="btn" onClick={handleInsuranceOcrScan} disabled={insuranceOcrLoading} style={{ marginTop: "0.5rem" }}>
+            {insuranceOcrLoading ? "Skeniranje..." : "Skeniraj i prefilaj"}
+          </button>
+        )}
+        {insuranceOcrError && <p className="error">{insuranceOcrError}</p>}
+        {insuranceOcrNotice && <p className="muted">{insuranceOcrNotice}</p>}
       </div>
 
       <form onSubmit={handleSubmit}>
@@ -293,7 +368,12 @@ export default function NewVehiclePage() {
         </label>
         <label>
           Datum isteka registracije
-          <input name="registrationExpiresAt" type="date" />
+          <input
+            name="registrationExpiresAt"
+            type="date"
+            value={registrationExpiresAt}
+            onChange={(e) => setRegistrationExpiresAt(e.target.value)}
+          />
         </label>
 
         {error && <p className="error">{error}</p>}

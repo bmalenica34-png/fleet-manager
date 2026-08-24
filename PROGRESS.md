@@ -4,7 +4,44 @@ Dinamički log stanja projekta. Ažurira se na kraju svake sesije. Za statičnu
 arhitekturu/konvencije vidi [CLAUDE.md](CLAUDE.md) — ovaj dokument je "što je
 gotovo i zašto", ne "kako treba izgledati".
 
-**Zadnje ažurirano:** 2026-08-24, sedamnaesti nastavak - korisnik prijavio
+**Zadnje ažurirano:** 2026-08-24, osamnaesti nastavak - korisnik potvrdio
+(screenshot produkcije, `/vehicles/new`) da deploy fix iz sedamnaestog
+nastavka drži - stranica se učitava ispravno, dva OCR slota (vanjska/
+unutarnja prometna) rade kako treba. Uočio da polica osiguranja OCR/prefill
+namjerno postoji SAMO na edit ekranu (`/vehicles/[id]`), ne na `/vehicles/
+new` (dokumentirana arhitektonska odluka iz trinaestog nastavka - vozilo
+još ne postoji, pa nema kamo trajno uploadati PDF). **Korisnik eksplicitno
+tražio da se ta odluka promijeni** - polica OCR treba postojati i na
+`/vehicles/new`, konzistentno s owner-mobileom koji to već ima (trinaesti
+nastavak, `apps/mobile/app/owner/vehicles/new.tsx`).
+
+Implementirano na webu (`apps/web/src/app/(owner)/vehicles/new/page.tsx`),
+1:1 isti obrazac kao postojeća dva OCR slota na istoj stranici i policу
+OCR na edit ekranu: treći border-box blok "Skeniraj policu osiguranja
+(OCR, opcionalno, PDF)", `accept="application/pdf"`, poziva postojeći
+`POST /api/ocr/insurance-policy` (bez promjene rute/backend logike - isti
+endpoint kao edit ekran). Vozilo još ne postoji pa se PDF NE uploada
+trajno, samo šalje na ekstrakciju (isto ograničenje kao mobile `new.tsx` -
+stvaran upload police ide na edit ekranu nakon "Spremi vozilo"). Prefila
+`registrationExpiresAt`/`licensePlate`/`vin`, ista napomena o pretpostavci
+("istek osiguranja kao proxy za istek registracije") kao na edit ekranu.
+**Nužna prateća izmjena:** `registrationExpiresAt` `<input type="date">` je
+prije bio nekontroliran (čitan iz `FormData` tek na submit) - OCR prefill
+zahtijeva da ga postavi izvana, pa je pretvoren u kontroliran input
+(`useState` + `value`/`onChange`), `handleSubmit` sad čita iz state-a
+umjesto `FormData.get`. Ponašanje pri ručnom unosu nepromijenjeno.
+Verifikacija: `tsc --noEmit` čist, `next build` čist (`/vehicles/new` ruta
+i dalje prisutna, veličina rasla s 4.13 kB na 4.7 kB - očekivano za jedan
+novi blok). **Nije vizualno potvrđeno kroz browser** - `/vehicles/new` je
+owner-auth-zaštićen, isti razlog kao više puta ranije u ovom logu
+(magic-link browser test prije eksplicitno ocijenjen preskupim za ovaj tip
+promjene, typecheck+build prihvaćen kao dovoljna verifikacija jer kod vjerno
+kopira već potvrđen obrazac). Nije još commitano/pushano - čeka korisnikovu
+potvrdu.
+
+---
+
+**Prijašnji dio (sedamnaesti nastavak)** - korisnik prijavio
 da Vercel deploy pada s "No Output Directory named 'public' found" i da
 polica osiguranja sekcija nedostaje na webu. **Ključan nalaz: OVAJ REPO
 JE SPOJEN NA DVA ODVOJENA VERCEL PROJEKTA**, oba se auto-deployaju na
