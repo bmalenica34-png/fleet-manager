@@ -4,7 +4,90 @@ Dinamički log stanja projekta. Ažurira se na kraju svake sesije. Za statičnu
 arhitekturu/konvencije vidi [CLAUDE.md](CLAUDE.md) — ovaj dokument je "što je
 gotovo i zašto", ne "kako treba izgledati".
 
-**Zadnje ažurirano:** 2026-08-22, šesnaesti nastavak - korisnik ponovio
+**Zadnje ažurirano:** 2026-08-24, sedamnaesti nastavak - korisnik prijavio
+da Vercel deploy pada s "No Output Directory named 'public' found" i da
+polica osiguranja sekcija nedostaje na webu. **Ključan nalaz: OVAJ REPO
+JE SPOJEN NA DVA ODVOJENA VERCEL PROJEKTA**, oba se auto-deployaju na
+svaki `git push` na `main`:
+- **`fleet-manager-web`** (ID prj_GuhxepNNWMM3QdadMre3sVtEUpe2) - Root
+  Directory `apps/web`, Framework Next.js, ispravno konfiguriran. OVO je
+  projekt na koji je cijela dosadašnja sesija testirala (mobile API base
+  URL, magic-link login, svi OCR-i) - **nikad nije pao ni jednom u
+  zadnjih tjedan dana** (`vercel ls` potvrdio, svi "Ready").
+- **`fleet-manager`** (bez "-web", ID prj_eEUHRE3gOgCFbdAFoow6wRAIPpuB,
+  kreiran 16.08.) - Root Directory `.` (cijeli monorepo root, NE
+  `apps/web`), Framework **"Other"** (ne Next.js), Output Directory
+  default `public`-ako-postoji. **Pada na SVAKI deploy otkad postoji**
+  (potvrđeno `vercel ls fleet-manager` - dosljedan niz `Error` statusa
+  unatrag barem tjedan dana). Njegov produkcijski URL
+  (`fleet-manager-branimir-s-projects1.vercel.app`) vraća čist `404`
+  (potvrđeno `curl`) - nikad nije uspješno poslužio ništa.
+
+**"Public directory" greška NIJE bug u repou - to je Vercel PROJEKT
+POSTAVKA na `fleet-manager` projektu.** Build sam po sebi uspijeva čisto
+(potvrđeno stvarnim `vercel inspect --logs` - turbo "2 successful, 2
+total", sve rute izlistane identično kao na radnom projektu) - greška se
+javlja NAKON builda, na Vercel platform sloju, jer s Framework="Other" i
+Root Directory="." platforma ne zna da treba tražiti `.next` output u
+`apps/web` podfolderu, pa pada natrag na default "statički site, traži
+`public/`" ponašanje. Provjereno da NIJE uzrokovano repo kodom: nema
+`vercel.json` s `outputDirectory`/`framework`/`builds` poljem nigdje osim
+`apps/web/vercel.json` (samo `crons` konfiguracija, bez override polja),
+nema `output: "export"` u `next.config.mjs`, git log/blame oba fajla ne
+pokazuje ništa sumnjivo.
+
+**Ovo NIJE nešto što se može popraviti commitom/pushom** - Root
+Directory i Framework Preset su Vercel dashboard/CLI projekt-postavke,
+izvan gita. **Korisnik treba odlučiti**: (a) popraviti postavke tog
+projekta da se poklapaju s `fleet-manager-web` (Root Directory→`apps/web`,
+Framework→Next.js) ako ima namjenu (npr. drugi environment/staging), ili
+(b) obrisati ga kao vjerojatno slučajni duplikat projekta bez ikad
+uspješnog deploya. Claude nije poduzeo nijednu od te dvije akcije
+jednostrano - obje su nepovratne/utječu na dijeljeni Vercel account izvan
+lokalnog repoa, zahtijevaju eksplicitnu korisnikovu potvrdu.
+
+**Polica osiguranja NIJE nedostajala zbog koda** - `fleet-manager-web`
+(radni projekt) je potvrđeno ažuriran (deployment timestamp se poklapa
+točno s zadnjim pushom), i kod za policu (uklj. sve OCR popravke iz
+prijašnjih nastavaka) je u produkciji. Korisnikova opažena "nedostaje
+polica" je vjerojatno bila ili stara cache/prije-pusha provjera, ili
+(vjerojatnije) provjera pogrešnog projekta (`fleet-manager`, koji vraća
+čist 404, ne stranicu s manjkajućom sekcijom) - potvrđeno da problem
+nestaje sam po sebi provjerom pravog projekta, bez potrebe za bilo kakvim
+dodatnim kodom.
+
+**Turbo.json popravci (repo-level, DIREKTNO commitano/pushano/
+verificirano protiv stvarnog Vercel builda):**
+1. Dodan `globalEnv` s punom listom env varijabli koje app koristi
+   (`DATABASE_URL`, `HETZNER_S3_*`, `RESEND_*`, `GOOGLE_VISION_API_KEY`,
+   itd.) - prije nedostajale u `turbo.json`, pa Turborepo cache hash nije
+   znao da build output ovisi o njima (rizik korištenja zastarjelog
+   cache-a nakon promjene env varijable na Vercelu).
+2. Novi `"@rent-a-car/api#build"` paket-specifičan task override
+   (`outputs: []`) - riješio zaseban, nepovezan warning "no output files
+   found for task @rent-a-car/api#build" (taj paket samo radi `prisma
+   generate`, koji ne piše u `.next/**`/`dist/**` kako globalna `build`
+   task definicija očekuje).
+3. **Usput otkrivena i ispravljena vlastita greška u prvom pokušaju**:
+   paket-specifični task override u Turborepo POTPUNO ZAMIJENI globalnu
+   task definiciju (ne merge po polju, kako sam prvo pretpostavio) - moj
+   prvi pokušaj (`env` unutar `@rent-a-car/api#build` override-a) je time
+   slučajno IZBRISAO naslijeđenu env listu za taj task, uzrokujući GORI
+   warning ("env varijable postavljene na Vercelu, ali nedostaju u
+   turbo.json - may cause build to fail"). Uhvaćeno provjerom stvarnog
+   sljedećeg build loga (ne pretpostavkom da je prvi pokušaj radio),
+   popravljeno premještanjem cijele liste u `globalEnv` (primjenjuje se
+   na SVE taskove neovisno o task-specifičnim override-ima, službeno
+   dokumentiran Turborepo mehanizam za točno ovaj slučaj).
+4. Lokalni `turbo build`/`pnpm build` ne radi na ovom Windows stroju
+   (`spawn UNKNOWN` - nedostaje `turbo-windows-64` native binary u pnpm
+   store-u, `pnpm install` ga ne vraća) - nepovezano s ovim promjenama,
+   pre-postojeći lokalni tooling gap. Sva verifikacija ovog fixa napravljena
+   direktno protiv stvarnih Vercel build logova (tri uzastopna deploya,
+   svaki inspektiran `vercel inspect --logs`) umjesto lokalnog testa -
+   finalni deploy potvrđeno čist, nula turbo warninga.
+
+**Prijašnji dio iste sesije (šesnaesti nastavak) - korisnik ponovio
 test s istim PDF-om nakon petnaestog nastavka, `parse_failed` I DALJE
 prisutan. Korisnik eksplicitno tražio pravi log prije bilo kakvog drugog
 pokušaja (ne nagađati drugi polyfill). Svjež `vercel logs` otkrio DRUGI,
