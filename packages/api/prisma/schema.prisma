@@ -77,6 +77,74 @@ model Owner {
 }
 
 // ---------------------------------------------------------------------------
+// Employee
+// ---------------------------------------------------------------------------
+
+enum EmployeeStatus {
+  active
+  deactivated
+}
+
+// Moduli koji se mogu dodijeliti/oduzeti pojedinom employeeu, neovisno jedan
+// o drugom (namjerno čisto odvojeni - vidi EmployeePermission niže, korisnik
+// razmišlja i o modularnom pricingu pa ovaj enum udvostručuje kao buduća
+// "koji je modul uopće dostupan/licenciran" granica).
+enum PermissionModule {
+  contracts
+  vehicles
+  clients
+  invoicing // R1/R2 računi - polje pripremljeno, fakturiranje još NIJE implementirano
+  settings
+}
+
+// App je single-tenant (jedna rent-a-car tvrtka za cijelu bazu, vidi
+// CLAUDE.md i CompanySettings komentar niže) - namjerno NEMA ownerId FK.
+// "Employee pripada owneru" u zahtjevu znači "dio je istog poslovnog
+// accounta", ne cross-tenant izolaciju - ta ne postoji nigdje drugdje u
+// shemi (Vehicle/Client/Contract su već globalni), pa dodavanje FK-a ovdje
+// bez stvarne tenant-scoping infrastrukture posvuda ne bi ništa postiglo.
+model Employee {
+  id        String         @id @default(cuid())
+  firstName String
+  lastName  String
+  email     String         @unique
+  status    EmployeeStatus @default(active)
+
+  // Isti obrazac kao Owner.userId - poveže se s Supabase auth accountom
+  // nakon prvog uspješnog magic-link logina. Employee redovi se
+  // pre-provisioniraju kroz /employees stranicu (owner-only) - login
+  // odbija emailove koji ovdje ne postoje ILI su deaktivirani, prije nego
+  // se uopće pošalje magic link. Nema zasebnog "invite email" koraka -
+  // identično owneru, employee sam zatraži magic link na /login kad mu
+  // owner kaže da je dodan.
+  userId String? @unique
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  permissions      EmployeePermission[]
+  createdContracts Contract[]
+
+  @@map("employees")
+}
+
+// Postojanje retka = dodijeljena permisija za taj modul (nema "enabled:
+// false" redaka - odsutnost je disabled). Zaseban model umjesto JSON polja
+// na Employee namjerno - upit "svi employeei s pristupom modulu X" je
+// direktan, i struktura se prirodno proširuje budućim per-modul
+// pricing/licencing konceptom bez migracije JSON sheme.
+model EmployeePermission {
+  employeeId String
+  employee   Employee         @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  module     PermissionModule
+
+  createdAt DateTime @default(now())
+
+  @@id([employeeId, module])
+  @@map("employee_permissions")
+}
+
+// ---------------------------------------------------------------------------
 // CompanySettings
 // ---------------------------------------------------------------------------
 
@@ -156,9 +224,15 @@ model Contract {
   // Owner/employee account koji je izdao ugovor - za potpisni blok na PDF-u
   // ("Za {firma}: {ime izdavatelja}"). Nullable jer postojeći ugovori
   // (kreirani prije ovog polja) nemaju taj podatak i ne mogu se retroaktivno
-  // popuniti.
+  // popuniti. Točno JEDNO od createdByOwnerId/createdByEmployeeId je
+  // postavljeno (app-level konvencija, ne DB constraint - Prisma nema
+  // nativan polymorphic FK, a stvarna "User" nadklasa bi zahtijevala veći
+  // refactor Owner/Employee auth sloja nego što ova promjena opravdava).
   createdByOwnerId String?
   createdByOwner   Owner?  @relation(fields: [createdByOwnerId], references: [id])
+
+  createdByEmployeeId String?
+  createdByEmployee   Employee? @relation(fields: [createdByEmployeeId], references: [id])
 
   // Jednokratan JWT signing token, 48h expiry, invalidira se odmah nakon potpisa.
   signingToken           String?   @unique

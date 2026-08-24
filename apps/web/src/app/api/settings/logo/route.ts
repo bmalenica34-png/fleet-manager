@@ -1,11 +1,11 @@
 import { NextResponse } from "next/server";
 import { buildObjectKey, setCompanyLogo, uploadObject } from "@rent-a-car/api/server";
-import { requireOwnerSession } from "@/lib/requireOwnerSession";
+import { requireModulePermission } from "@/lib/requireOwnerSession";
 
 export const runtime = "nodejs";
 
 export async function POST(request: Request) {
-  const auth = await requireOwnerSession(request);
+  const auth = await requireModulePermission(request, "settings");
   if (!auth.authorized) return auth.response;
 
   const formData = await request.formData();

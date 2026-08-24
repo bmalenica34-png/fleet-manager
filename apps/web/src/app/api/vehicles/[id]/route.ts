@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { vehicleUpdateSchema } from "@rent-a-car/api";
 import { deleteVehicle, getVehicle, updateVehicle } from "@rent-a-car/api/server";
 import { zodErrorResponse } from "@/lib/handleZodError";
-import { requireOwnerSession } from "@/lib/requireOwnerSession";
+import { requireModulePermission, requireOwnerSession } from "@/lib/requireOwnerSession";
 
 export const runtime = "nodejs";
 
@@ -24,7 +24,7 @@ export async function PATCH(
   request: Request,
   { params }: { params: { id: string } }
 ) {
-  const auth = await requireOwnerSession(request);
+  const auth = await requireModulePermission(request, "vehicles");
   if (!auth.authorized) return auth.response;
 
   const body = await request.json();
@@ -39,7 +39,7 @@ export async function DELETE(
   request: Request,
   { params }: { params: { id: string } }
 ) {
-  const auth = await requireOwnerSession(request);
+  const auth = await requireModulePermission(request, "vehicles");
   if (!auth.authorized) return auth.response;
 
   await deleteVehicle(params.id);

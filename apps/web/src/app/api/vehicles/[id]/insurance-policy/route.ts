@@ -4,7 +4,7 @@ import {
   setVehicleInsurancePolicy,
   uploadObject,
 } from "@rent-a-car/api/server";
-import { requireOwnerSession } from "@/lib/requireOwnerSession";
+import { requireModulePermission } from "@/lib/requireOwnerSession";
 
 export const runtime = "nodejs";
 
@@ -12,7 +12,7 @@ export async function POST(
   request: Request,
   { params }: { params: { id: string } }
 ) {
-  const auth = await requireOwnerSession(request);
+  const auth = await requireModulePermission(request, "vehicles");
   if (!auth.authorized) return auth.response;
 
   const formData = await request.formData();

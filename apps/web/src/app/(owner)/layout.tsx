@@ -1,6 +1,6 @@
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
-import { resolveOwnerByUserId } from "@rent-a-car/api/server";
+import { principalHasPermission, resolveOwnerAppPrincipal } from "@rent-a-car/api/server";
 
 export default async function OwnerLayout({
   children,
@@ -16,10 +16,15 @@ export default async function OwnerLayout({
     redirect("/login");
   }
 
-  const owner = await resolveOwnerByUserId(user.id);
-  if (!owner) {
+  // Owner ILI aktivan Employee - vidi resolveOwnerAppPrincipal. Deaktiviran
+  // employee (ili bilo tko drugi bez zapisa) resolvea u null i vraća se na
+  // login identično kao da nije ulogiran.
+  const principal = await resolveOwnerAppPrincipal(user.id);
+  if (!principal) {
     redirect("/login");
   }
+
+  const canSettings = principalHasPermission(principal, "settings");
 
   return (
     <>
@@ -31,7 +36,8 @@ export default async function OwnerLayout({
           <a href="/vehicles">Vozila</a>
           <a href="/clients">Klijenti</a>
           <a href="/contracts">Ugovori</a>
-          <a href="/settings">Postavke</a>
+          {canSettings && <a href="/settings">Postavke</a>}
+          {principal.kind === "owner" && <a href="/employees">Zaposlenici</a>}
           <form action="/api/auth/logout" method="POST" style={{ display: "inline" }}>
             <button type="submit" className="btn">
               Odjava

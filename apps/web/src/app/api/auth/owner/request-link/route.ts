@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { isEmailAllowedAsOwner } from "@rent-a-car/api/server";
+import { isEmailAllowedForOwnerApp } from "@rent-a-car/api/server";
 import { createClient } from "@/lib/supabase/server";
 import { resolveEmailRedirectTo } from "@/lib/mobileRedirect";
 
@@ -13,8 +13,10 @@ export async function POST(request: Request) {
   }
 
   // Allowlist provjera PRIJE slanja magic linka - nasumični email ne smije
-  // moći uopće otvoriti Supabase auth sesiju na owner strani.
-  const allowed = await isEmailAllowedAsOwner(email);
+  // moći uopće otvoriti Supabase auth sesiju na owner strani. Provjerava
+  // Owner ILI aktivan Employee - ista login stranica se dijeli između oba
+  // (uloga se odredi nakon logina, vidi requireOwnerSession).
+  const allowed = await isEmailAllowedForOwnerApp(email);
   if (!allowed) {
     return NextResponse.json({ error: "not_authorized" }, { status: 403 });
   }

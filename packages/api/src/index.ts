@@ -1,5 +1,6 @@
 export * from "./schemas/vehicle";
 export * from "./schemas/companySettings";
+export * from "./schemas/employee";
 export * from "./schemas/client";
 export * from "./schemas/contract";
 export * from "./schemas/handoverPhoto";
@@ -24,4 +25,6 @@ export type {
   AnnexStatus,
   PhotoRequest,
   CompanySettings,
+  Employee,
+  EmployeeStatus as EmployeeStatusModel,
 } from "@prisma/client";

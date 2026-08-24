@@ -1,5 +1,6 @@
 import type { Client, Owner } from "@prisma/client";
 import { prisma } from "../db/client";
+import type { PermissionModule } from "../schemas/employee";
 
 export async function resolveOwnerByUserId(userId: string): Promise<Owner | null> {
   return prisma.owner.findUnique({ where: { userId } });
@@ -48,6 +49,86 @@ export async function linkOwnerAccount(userId: string, email: string): Promise<v
  * a ugovore ostalih premjestimo na taj isti red - inače bi ostali
  * nepovezani i nevidljivi klijentu.
  */
+// ---------------------------------------------------------------------------
+// Owner-app principal (owner ILI employee) - vidi PROGRESS.md "Employee
+// accounts" nastavak. Owner i Employee su odvojeni Prisma modeli (Employee
+// se pre-provisionira po emailu isto kao Owner, vidi schema.prisma komentar
+// na Employee), ovaj sloj ih normalizira u jedan tip za API guardove/UI.
+// ---------------------------------------------------------------------------
+
+export type SessionPrincipal =
+  | { kind: "owner"; id: string; name: string | null; email: string }
+  | { kind: "employee"; id: string; name: string; email: string; permissions: PermissionModule[] };
+
+export function principalHasPermission(
+  principal: SessionPrincipal,
+  module: PermissionModule
+): boolean {
+  return principal.kind === "owner" || principal.permissions.includes(module);
+}
+
+/**
+ * Owner uvijek ima puni pristup (hardcoded, ne editable - vidi zahtjev).
+ * Deaktiviran employee (status "deactivated") namjerno resolvea u null iako
+ * njegov Supabase userId i dalje postoji - deaktivacija tako funkcionalno
+ * "gasi login" bez brisanja Supabase accounta ili povijesnih podataka
+ * (Contract.createdByEmployeeId ostaje netaknut).
+ */
+export async function resolveOwnerAppPrincipal(userId: string): Promise<SessionPrincipal | null> {
+  const owner = await prisma.owner.findUnique({ where: { userId } });
+  if (owner) {
+    return { kind: "owner", id: owner.id, name: owner.name, email: owner.email };
+  }
+
+  const employee = await prisma.employee.findUnique({
+    where: { userId },
+    include: { permissions: true },
+  });
+  if (employee && employee.status === "active") {
+    return {
+      kind: "employee",
+      id: employee.id,
+      name: `${employee.firstName} ${employee.lastName}`,
+      email: employee.email,
+      permissions: employee.permissions.map((p) => p.module),
+    };
+  }
+
+  return null;
+}
+
+/**
+ * Isto kao isEmailAllowedAsOwner, prošireno na aktivne Employee redove -
+ * poziva se PRIJE slanja magic linka na owner-app login stranici (koju sad
+ * dijele owner i employee, vidi apps/web/.../auth/owner/request-link).
+ */
+export async function isEmailAllowedForOwnerApp(email: string): Promise<boolean> {
+  const allowedAsOwner = await isEmailAllowedAsOwner(email);
+  if (allowedAsOwner) return true;
+
+  const employee = await prisma.employee.findFirst({
+    where: { email: { equals: email, mode: "insensitive" }, status: "active" },
+  });
+  return employee !== null;
+}
+
+/**
+ * Isto kao linkOwnerAccount, prošireno da pokuša i Employee povezivanje -
+ * oba poziva su no-op ako se ne primjenjuju, pa je sigurno pozvati oba bez
+ * obzira je li ovo owner ili employee login (isti obrazac kao
+ * linkOwnerAccount + linkGuestClientsToUser u api/auth/callback).
+ */
+export async function linkAccountAfterOwnerAppLogin(userId: string, email: string): Promise<void> {
+  await linkOwnerAccount(userId, email);
+
+  const employee = await prisma.employee.findFirst({
+    where: { email: { equals: email, mode: "insensitive" }, userId: null, status: "active" },
+  });
+  if (employee) {
+    await prisma.employee.update({ where: { id: employee.id }, data: { userId } });
+  }
+}
+
 export async function linkGuestClientsToUser(userId: string, email: string): Promise<number> {
   const guestClients = await prisma.client.findMany({
     where: { email: { equals: email, mode: "insensitive" }, userId: null },

@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { contractCreateSchema } from "@rent-a-car/api";
 import { createContractAndSendSigningEmail, listContractsWithDocumentUrls } from "@rent-a-car/api/server";
 import { zodErrorResponse } from "@/lib/handleZodError";
-import { requireOwnerSession } from "@/lib/requireOwnerSession";
+import { requireModulePermission, requireOwnerSession } from "@/lib/requireOwnerSession";
 
 export const runtime = "nodejs";
 
@@ -14,13 +14,16 @@ export async function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
-  const auth = await requireOwnerSession(request);
+  const auth = await requireModulePermission(request, "contracts");
   if (!auth.authorized) return auth.response;
 
   const body = await request.json();
   const parsed = contractCreateSchema.safeParse(body);
   if (!parsed.success) return zodErrorResponse(parsed.error);
 
-  const contract = await createContractAndSendSigningEmail(parsed.data, auth.owner.id);
+  const contract = await createContractAndSendSigningEmail(parsed.data, {
+    kind: auth.principal.kind,
+    id: auth.principal.id,
+  });
   return NextResponse.json(contract, { status: 201 });
 }

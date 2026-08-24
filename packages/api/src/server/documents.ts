@@ -27,6 +27,7 @@ export async function finalizeContractDocuments(contractId: string): Promise<voi
       vehicle: true,
       client: true,
       createdByOwner: true,
+      createdByEmployee: true,
       handoverPhotos: { where: { photoRequestId: null } },
     },
   });
@@ -49,10 +50,17 @@ export async function finalizeContractDocuments(contractId: string): Promise<voi
     getCompanyInfoForPdf(),
   ]);
 
-  // Ime izdavatelja u potpisnom bloku - vlasnik/employee koji je kreirao
-  // ugovor (Contract.createdByOwnerId). Null za ugovore kreirane prije nego
-  // je ovo polje uvedeno - ContractPdf tada jednostavno preskače tu liniju.
-  const issuedByName = contract.createdByOwner?.name ?? contract.createdByOwner?.email ?? null;
+  // Ime izdavatelja u potpisnom bloku - vlasnik ILI employee koji je kreirao
+  // ugovor (točno jedno od createdByOwnerId/createdByEmployeeId je
+  // postavljeno, vidi schema.prisma komentar). Null za ugovore kreirane
+  // prije nego je ovo polje uvedeno - ContractPdf tada jednostavno preskače
+  // tu liniju.
+  const issuedByName =
+    contract.createdByOwner?.name ??
+    contract.createdByOwner?.email ??
+    (contract.createdByEmployee
+      ? `${contract.createdByEmployee.firstName} ${contract.createdByEmployee.lastName}`
+      : null);
 
   const [contractPdfBuffer, protocolPdfBuffer] = await Promise.all([
     renderContractPdf({

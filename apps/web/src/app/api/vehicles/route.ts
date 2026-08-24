@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { vehicleCreateSchema } from "@rent-a-car/api";
 import { createVehicle, listVehicles } from "@rent-a-car/api/server";
 import { zodErrorResponse } from "@/lib/handleZodError";
-import { requireOwnerSession } from "@/lib/requireOwnerSession";
+import { requireModulePermission, requireOwnerSession } from "@/lib/requireOwnerSession";
 
 export const runtime = "nodejs";
 
@@ -15,7 +15,7 @@ export async function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
-  const auth = await requireOwnerSession(request);
+  const auth = await requireModulePermission(request, "vehicles");
   if (!auth.authorized) return auth.response;
 
   const body = await request.json();

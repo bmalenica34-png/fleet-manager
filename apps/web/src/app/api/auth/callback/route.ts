@@ -1,18 +1,19 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import {
+  linkAccountAfterOwnerAppLogin,
   linkGuestClientsToUser,
-  linkOwnerAccount,
-  resolveOwnerByUserId,
+  resolveOwnerAppPrincipal,
 } from "@rent-a-car/api/server";
 
 export const runtime = "nodejs";
 
 /**
- * Jedan callback za owner i client magic link - uloga se ne prenosi kroz
- * redirect URL, nego se odredi nakon logina provjerom Owner/Client
- * tablica. Oba linking poziva su no-op ako se ne primjenjuju, pa je
- * sigurno pozvati oba bez obzira koja je login stranica inicirala flow.
+ * Jedan callback za owner/employee i client magic link - uloga se ne
+ * prenosi kroz redirect URL, nego se odredi nakon logina provjerom
+ * Owner/Employee/Client tablica. Svi linking pozivi su no-op ako se ne
+ * primjenjuju, pa je sigurno pozvati sve bez obzira koja je login stranica
+ * inicirala flow.
  */
 export async function GET(request: Request) {
   const url = new URL(request.url);
@@ -31,11 +32,11 @@ export async function GET(request: Request) {
 
   const { id: userId, email } = data.user;
 
-  await linkOwnerAccount(userId, email);
+  await linkAccountAfterOwnerAppLogin(userId, email);
   await linkGuestClientsToUser(userId, email);
 
-  const owner = await resolveOwnerByUserId(userId);
-  const destination = owner ? "/vehicles" : "/portal";
+  const principal = await resolveOwnerAppPrincipal(userId);
+  const destination = principal ? "/vehicles" : "/portal";
 
   return NextResponse.redirect(new URL(destination, url.origin));
 }

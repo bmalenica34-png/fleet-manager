@@ -4,7 +4,139 @@ Dinamički log stanja projekta. Ažurira se na kraju svake sesije. Za statičnu
 arhitekturu/konvencije vidi [CLAUDE.md](CLAUDE.md) — ovaj dokument je "što je
 gotovo i zašto", ne "kako treba izgledati".
 
-**Zadnje ažurirano:** 2026-08-24, devetnaesti nastavak - korisnik zatražio dva
+**Zadnje ažurirano:** 2026-08-24, dvadeseti nastavak - korisnik zatražio
+employee accounts s per-modul permisijama. Implementirano i verificirano
+protiv stvarne baze, uklj. arhitektonske odluke koje je korisnik izričito
+prepustio meni.
+
+**Arhitektonske odluke (korisnik eksplicitno rekao "procijeni"):**
+- **Employee NEMA ownerId/tenantId FK.** App je single-tenant (jedna
+  rent-a-car tvrtka za cijelu bazu - Vehicle/Client/Contract su već globalni,
+  bez tenant-scopinga bilo gdje). "Employee pripada owneru" shvaćeno kao
+  "dio je istog poslovnog accounta", ne kao zahtjev za cross-tenant izolaciju
+  koja ne postoji nigdje drugdje u shemi.
+- **Contract.createdByOwnerId PROŠIREN sibling poljem
+  (`createdByEmployeeId`), NE preimenovan/pretvoren u polymorphic union.**
+  Razmatrane 3 opcije: (a) sibling nullable FK (odabrano), (b) polymorphic
+  `createdByType` + `createdById` bez FK constrainta (gubi referencijalni
+  integritet na DB razini), (c) zajednička "User" nadklasa za Owner/Employee
+  (najveći refactor - dirao bi cijeli auth sloj radi jednog polja). App-level
+  konvencija: točno JEDNO od dva polja je postavljeno, dokumentirano u
+  schema.prisma komentaru.
+- **Permisije: zaseban `EmployeePermission` model (redak = dodijeljen
+  modul), NE JSON polje na Employee.** Korisnik spomenuo modularni pricing
+  kao budući smjer - relacijski model se prirodno proširuje (upit "svi
+  employeei s pristupom X" je direktan) bez migracije JSON sheme za svaki
+  novi modul.
+- **Employee login dijeli ISTU `/login` stranicu i magic-link mehanizam kao
+  Owner** (ne novi "invite email" flow) - korisnik eksplicitno tražio da se
+  replicira postojeći owner obrazac, koji se pokazao biti "pre-provisioniraj
+  po emailu, korisnik sam zatraži magic link" (nema proaktivnog invite
+  maila ni za ownera trenutno).
+
+**Shema.** `Employee` (firstName/lastName/email @unique/status
+active|deactivated/userId @unique nullable - isti obrazac kao Owner.userId),
+`EmployeePermission` (`@@id([employeeId, module])`, postojanje retka =
+dodijeljena permisija, nema "enabled: false" redaka), `PermissionModule` enum
+(contracts/vehicles/clients/invoicing/settings - invoicing polje pripremljeno,
+fakturiranje NIJE implementirano). `Contract.createdByEmployeeId` (nullable
+FK, ne backfilla se retroaktivno). Migracija ručno napisana (isti razlog kao
+prijašnja dva nastavka - shadow-DB replay pada na pre-postojećoj migraciji
+20260820073000), primijenjena `prisma migrate deploy` izravno na
+produkcijsku bazu.
+
+**Auth sloj (`packages/api/src/server/auth.ts`, nove funkcije UZ postojeće,
+ništa staro obrisano).** `SessionPrincipal` discriminated union
+(`{kind:"owner",...}` / `{kind:"employee",...,permissions}`) normalizira
+Owner i Employee u jedan tip za guardove/UI. `resolveOwnerAppPrincipal`
+(owner uvijek puni pristup - hardcoded, ne editable, kako je traženo;
+deaktiviran employee resolvea u `null` iako Supabase userId i dalje postoji -
+deaktivacija tako funkcionalno gasi login bez brisanja Supabase accounta ili
+`Contract.createdByEmployeeId` povijesti). `isEmailAllowedForOwnerApp` i
+`linkAccountAfterOwnerAppLogin` prošireni ekvivalenti postojećih
+owner-only funkcija, pozvani iz `/api/auth/owner/request-link`,
+`/api/auth/callback`, `/api/auth/mobile/resolve` i `(owner)/layout.tsx` (svi
+mjesta gdje se prije koristio `resolveOwnerByUserId`/`isEmailAllowedAsOwner`/
+`linkOwnerAccount` direktno).
+
+**Enforcement.** `apps/web/src/lib/requireOwnerSession.ts`: `requireOwnerSession`
+zadržao ime i "je li ulogiran" ponašanje (samo JEDAN od 15 postojećih poziva
+je čitao povratni `.owner` - `contracts/route.ts` - pa je promjena povratnog
+oblika u `{principal}` bila jeftina, ostalih 14 poziva samo provjerava
+`.authorized`). Nova `requireModulePermission(request, module)` - gatea
+POST/PATCH/DELETE mutacije po modulu na SVIM postojećim rutama:
+vehicles (`/api/vehicles` POST, `/api/vehicles/[id]` PATCH+DELETE, images,
+registration-doc, insurance-policy, sva 3 OCR endpointa), clients
+(`/api/clients` POST), contracts (`/api/contracts` POST, photo-requests),
+settings (GET+PATCH+logo - JEDINI modul gdje se i ČITANJE gatea, nema
+cross-modul razloga za čitanje settings podataka kroz API kao što ga ima
+vehicles/clients listing za contract-kreiranje dropdown). GET/listing rute za
+vehicles/clients/contracts NAMJERNO ostaju pod plain `requireOwnerSession`
+(bilo koji ulogirani owner-app principal) - contracts-only employee treba
+moći popuniti vehicle/client dropdown na "novi ugovor" formi. Nova
+`requireOwnerOnlySession` - `/api/employees*` je IZVAN permission sustava u
+potpunosti (čak ni employee sa "settings" permisijom ne smije upravljati
+drugim employeeima/permisijama - privilege escalation granica, hardcodano na
+`principal.kind === "owner"`).
+
+**Mobile nasljeđuje enforcement automatski, BEZ ikakve mobile promjene** -
+potvrđeno provjerom `apps/mobile/src/lib/api.ts`: `createVehicle`/
+`updateVehicle`/`createClient` i mobile-ov `/api/contracts` poziv idu na
+ISTE web API rute koje su upravo gatane, `requireOwnerSession` već podržava
+Bearer token (mobile nema cookie jar). Mobile login (`role=owner` zaslon)
+također dijeli `/api/auth/owner/request-link` i `/api/auth/mobile/resolve`
+- employee se na mobileu resolvea kao `role: "owner"` (ista owner-mobile
+app pokriva i owner i employee, permisije se provjeravaju po API pozivu, ne
+po roli).
+
+**Potpisni blok.** `documents.ts`-ov `issuedByName` proširen:
+`contract.createdByOwner?.name ?? ...email ?? (createdByEmployee ?
+firstName+lastName : null)`. `ContractPdf.tsx` NIJE trebao izmjenu (već
+prima gotov `issuedByName` string, agnostičan na owner-vs-employee izvor).
+
+**UI.** Nova `/employees` stranica (owner-only server-side gate, redirect na
+`/vehicles` za bilo koga drugog) - lista employeeja, forma za dodavanje
+(ime/prezime/email/permission checkboxovi), per-employee checkbox toggle po
+modulu (PATCH, replace-cijeli-set semantika), aktiviraj/deaktiviraj gumb.
+`(owner)/layout.tsx` nav sad uvjetan: "Postavke" link samo uz `settings`
+permisiju, "Zaposlenici" link samo za pravog ownera. `/settings` stranica
+podijeljena na server-component `page.tsx` (permission gate + redirect) +
+novi `SettingsForm.tsx` client component (identičan prijašnji sadržaj,
+premješten bez promjene logike) - sprječava direktnu navigaciju na URL, ne
+samo API poziv. **Namjerno NIJE dirano:** "+ Dodaj vozilo"/"Novi klijent"
+gumbi na `/vehicles`/`/clients` listing stranicama i dalje vidljivi
+neovisno o permisiji (klik bi doveo do 403 s API-ja, funkcionalno
+blokirano, ali gumb ostaje prikazan) - hvatanje ovoga na UI razini bi
+tražilo novi "tko sam ja" endpoint + izmjenu 3 dodatne client-component
+stranice, procijenjeno kao follow-up ako korisnik zatraži, ne dio ovog
+zahtjeva (koji je tražio da se AKCIJA blokira, ne da se gumb sakrije).
+
+**Verifikacija.** `tsc --noEmit` čist na sva tri paketa, `next build` čist
+(nove rute `/employees`, `/api/employees`, `/api/employees/[id]` vidljive).
+**Stvaran end-to-end test protiv produkcijske baze** (privremena debug ruta,
+ista tehnika kao prijašnja dva nastavka): kreiran test-employee sa SAMO
+"contracts" permisijom, `userId` postavljen izravno (simulira magic-link
+link bez pravog Supabase logina) → `resolveOwnerAppPrincipal` vratio
+`kind:"employee", permissions:["contracts"]` → `principalHasPermission`
+provjeren za svih 5 modula: `contracts:true`, ostala 4 `false` (točno
+korisnikov test scenarij - ne može unijeti vozilo/klijenta, ne može u
+postavke). Deaktivacija testirana → principal resolvea u `null`,
+`isEmailAllowedForOwnerApp` vraća `false` (magic-link zahtjev bi bio
+odbijen). Reaktivacija + dodavanje "vehicles" permisije testirana → korektan
+replace-cijeli-set rezultat. **Potpisni blok s employee izdavateljem**
+testiran stvarnim `renderContractPdf` pozivom (isti obrazac kao prijašnji
+nastavak za logo) - generirani PDF pregledan (Read tool), potpisni blok
+ispravno prikazuje "Za Test Rent d.o.o." / "Test Zaposlenik, 24. 08. 2026.
+17:10". Test podaci (Employee red, cascade-obrisane permisije) obrisani
+nakon verifikacije, debug rute i privremeni `renderContractPdf` re-export
+uklonjeni (`git status` potvrđuje čist diff). Nije testirano kroz pravi
+Supabase magic-link klik za employee login (isti razlog kao ranije - trošak
+browser auth testa), ali `resolveOwnerAppPrincipal`/`isEmailAllowedForOwnerApp`
+logika koju taj flow poziva je izravno testirana stvarnim pozivima iznad.
+
+---
+
+**Prijašnji dio (devetnaesti nastavak)** - korisnik zatražio dva
 povezana feature-a: (1) Settings stranica za podatke tvrtke + logo, (2)
 tekstualni potpisni blok "s naše strane" na Contract PDF-u. Oboje
 implementirano, novom migracijom primijenjenom protiv produkcijske baze.

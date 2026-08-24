@@ -129,9 +129,11 @@ export async function listContractsForClientUser(userId: string): Promise<Contra
  * te šalje mail klijentu s linkom za potpis. Status prelazi u "sent" tek
  * nakon što je mail uspješno poslan.
  */
+export type ContractCreatedBy = { kind: "owner"; id: string } | { kind: "employee"; id: string };
+
 export async function createContractAndSendSigningEmail(
   input: ContractCreateInput,
-  createdByOwnerId?: string
+  createdBy?: ContractCreatedBy
 ): Promise<ContractWithRelations> {
   const [vehicle, client] = await Promise.all([
     prisma.vehicle.findUniqueOrThrow({ where: { id: input.vehicleId } }),
@@ -152,7 +154,8 @@ export async function createContractAndSendSigningEmail(
       pricePerDay: input.pricePerDay,
       excessAmount: input.excessAmount,
       paymentMethod: input.paymentMethod,
-      createdByOwnerId,
+      createdByOwnerId: createdBy?.kind === "owner" ? createdBy.id : undefined,
+      createdByEmployeeId: createdBy?.kind === "employee" ? createdBy.id : undefined,
     },
   });
 
