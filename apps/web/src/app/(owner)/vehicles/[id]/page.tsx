@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useParams } from "next/navigation";
-import type { VehicleDTO } from "@rent-a-car/api/server";
+import type { ServiceRecordDTO, VehicleDTO } from "@rent-a-car/api/server";
 import { OTHER_VEHICLE_OPTION, VEHICLE_MAKES, VEHICLE_MODELS_BY_MAKE, formatDateHr } from "@rent-a-car/api";
 
 const CURRENT_YEAR = new Date().getFullYear();
@@ -78,6 +78,21 @@ export default function VehicleDetailPage() {
   const [closingContract, setClosingContract] = useState(false);
   const [togglingService, setTogglingService] = useState(false);
 
+  // Servisna knjižica - učitava se neovisno o aktivnom tabu (isti obrazac
+  // kao contracts), da ukupan trošak/broj zapisa bude spreman čim se tab
+  // otvori, bez dodatnog loading treptaja.
+  const [serviceRecords, setServiceRecords] = useState<ServiceRecordDTO[]>([]);
+  const [serviceRecordsLoading, setServiceRecordsLoading] = useState(true);
+  const [serviceDate, setServiceDate] = useState("");
+  const [serviceDescription, setServiceDescription] = useState("");
+  const [serviceCost, setServiceCost] = useState("");
+  const [serviceProvider, setServiceProvider] = useState("");
+  const [serviceReceiptFile, setServiceReceiptFile] = useState<File | null>(null);
+  const [serviceMarkUnderService, setServiceMarkUnderService] = useState(false);
+  const [savingServiceRecord, setSavingServiceRecord] = useState(false);
+  const [serviceRecordError, setServiceRecordError] = useState<string | null>(null);
+  const [deletingServiceRecordId, setDeletingServiceRecordId] = useState<string | null>(null);
+
   const [make, setMake] = useState("");
   const [customMake, setCustomMake] = useState("");
   const [model, setModel] = useState("");
@@ -149,6 +164,21 @@ export default function VehicleDetailPage() {
       .finally(() => setContractsLoading(false));
   }, []);
 
+  function loadServiceRecords() {
+    setServiceRecordsLoading(true);
+    fetch(`/api/vehicles/${vehicleId}/service-records`)
+      .then((res) => res.json())
+      .then(setServiceRecords)
+      .finally(() => setServiceRecordsLoading(false));
+  }
+
+  useEffect(() => {
+    loadServiceRecords();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [vehicleId]);
+
+  const totalServiceCost = serviceRecords.reduce((sum, r) => sum + r.cost, 0);
+
   const vehicleContracts = contracts.filter((c) => c.vehicleId === vehicleId);
 
   // Aktivan ugovor - status "signed" i danas je unutar dateFrom/dateTo.
@@ -186,6 +216,66 @@ export default function VehicleDetailPage() {
     });
     setTogglingService(false);
     load();
+  }
+
+  async function handleAddServiceRecord(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setServiceRecordError(null);
+
+    if (!serviceDate || !serviceDescription.trim() || !serviceCost) {
+      setServiceRecordError("Popuni datum, opis i trošak.");
+      return;
+    }
+
+    setSavingServiceRecord(true);
+
+    const formData = new FormData();
+    formData.append("date", serviceDate);
+    formData.append("description", serviceDescription.trim());
+    formData.append("cost", serviceCost);
+    if (serviceProvider.trim()) formData.append("provider", serviceProvider.trim());
+    if (serviceReceiptFile) formData.append("receipt", serviceReceiptFile);
+
+    const res = await fetch(`/api/vehicles/${vehicleId}/service-records`, {
+      method: "POST",
+      body: formData,
+    });
+
+    if (!res.ok) {
+      setSavingServiceRecord(false);
+      setServiceRecordError("Greška prilikom spremanja zapisa.");
+      return;
+    }
+
+    // Checkbox je samo prečac za ne-obavezno vezan "na servisu" toggle
+    // (korisnikov zahtjev) - odvojen PATCH poziv na već postojeću rutu, ne
+    // dio service-record kreiranja. Šalje se samo kad korisnik stvarno
+    // zatraži (i vozilo već nije na servisu) da ne piše nepotrebno.
+    if (serviceMarkUnderService && vehicle && !vehicle.underService) {
+      await fetch(`/api/vehicles/${vehicleId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ underService: true }),
+      });
+    }
+
+    setSavingServiceRecord(false);
+    setServiceDate("");
+    setServiceDescription("");
+    setServiceCost("");
+    setServiceProvider("");
+    setServiceReceiptFile(null);
+    setServiceMarkUnderService(false);
+    loadServiceRecords();
+    load();
+  }
+
+  async function handleDeleteServiceRecord(id: string) {
+    if (!confirm("Obrisati ovaj servisni zapis? Ova radnja je nepovratna.")) return;
+    setDeletingServiceRecordId(id);
+    await fetch(`/api/vehicles/${vehicleId}/service-records/${id}`, { method: "DELETE" });
+    setDeletingServiceRecordId(null);
+    loadServiceRecords();
   }
 
   // Povijest, najnovije prvo (po dateFrom) + opcionalan date-range filter
@@ -872,10 +962,125 @@ export default function VehicleDetailPage() {
       )}
 
       {activeTab === "service" && (
-        <p className="muted" style={{ marginTop: "2rem" }}>
-          Servisna knjižica - uskoro. Puna funkcionalnost servisne povijesti (unos servisa, datumi,
-          troškovi) dolazi u budućoj nadogradnji.
-        </p>
+        <div style={{ marginTop: "2rem" }}>
+          <p>
+            <strong>Ukupan trošak servisa: {totalServiceCost.toFixed(2)} €</strong>
+          </p>
+
+          <h2 style={{ marginTop: "1.5rem" }}>Nova intervencija</h2>
+          <form onSubmit={handleAddServiceRecord}>
+            <label>
+              Datum
+              <input
+                type="date"
+                value={serviceDate}
+                onChange={(e) => setServiceDate(e.target.value)}
+                required
+              />
+            </label>
+            <label>
+              Opis intervencije
+              <input
+                value={serviceDescription}
+                onChange={(e) => setServiceDescription(e.target.value)}
+                placeholder="npr. Zamjena ulja i filtera"
+                required
+              />
+            </label>
+            <label>
+              Trošak (EUR)
+              <input
+                type="number"
+                min={0}
+                step="0.01"
+                value={serviceCost}
+                onChange={(e) => setServiceCost(e.target.value)}
+                required
+              />
+            </label>
+            <label>
+              Servis / dobavljač
+              <input
+                value={serviceProvider}
+                onChange={(e) => setServiceProvider(e.target.value)}
+                placeholder="npr. Autoservis Horvat"
+              />
+            </label>
+            <label>
+              Račun / dokument (opcionalno)
+              <input
+                type="file"
+                accept="image/*,.pdf"
+                onChange={(e) => setServiceReceiptFile(e.target.files?.[0] ?? null)}
+              />
+            </label>
+            {vehicle && !vehicle.underService && (
+              <label style={{ flexDirection: "row", alignItems: "center", gap: "0.5rem" }}>
+                <input
+                  type="checkbox"
+                  checked={serviceMarkUnderService}
+                  onChange={(e) => setServiceMarkUnderService(e.target.checked)}
+                  style={{ width: "auto" }}
+                />
+                Vozilo je trenutno na servisu
+              </label>
+            )}
+
+            {serviceRecordError && <p className="error">{serviceRecordError}</p>}
+
+            <button className="btn btn-primary" type="submit" disabled={savingServiceRecord}>
+              {savingServiceRecord ? "Spremanje..." : "Dodaj zapis"}
+            </button>
+          </form>
+
+          <h2 style={{ marginTop: "2rem" }}>Povijest intervencija</h2>
+          {serviceRecordsLoading ? (
+            <p className="muted">Učitavanje...</p>
+          ) : serviceRecords.length === 0 ? (
+            <p className="muted">Nema unesenih servisnih zapisa.</p>
+          ) : (
+            <table>
+              <thead>
+                <tr>
+                  <th>Datum</th>
+                  <th>Opis</th>
+                  <th>Trošak</th>
+                  <th>Servis</th>
+                  <th>Račun</th>
+                  <th />
+                </tr>
+              </thead>
+              <tbody>
+                {serviceRecords.map((r) => (
+                  <tr key={r.id}>
+                    <td>{formatDateHr(r.date)}</td>
+                    <td>{r.description}</td>
+                    <td>{r.cost.toFixed(2)} €</td>
+                    <td>{r.provider ?? <span className="muted">—</span>}</td>
+                    <td>
+                      {r.receiptUrl ? (
+                        <a href={r.receiptUrl} target="_blank" rel="noreferrer">
+                          pregledaj
+                        </a>
+                      ) : (
+                        <span className="muted">—</span>
+                      )}
+                    </td>
+                    <td>
+                      <button
+                        className="btn btn-danger"
+                        onClick={() => handleDeleteServiceRecord(r.id)}
+                        disabled={deletingServiceRecordId === r.id}
+                      >
+                        {deletingServiceRecordId === r.id ? "Brisanje..." : "Obriši"}
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
       )}
 
       {activeTab === "contracts" && (

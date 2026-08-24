@@ -56,8 +56,9 @@ model Vehicle {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  images    VehicleImage[]
-  contracts Contract[]
+  images         VehicleImage[]
+  contracts      Contract[]
+  serviceRecords ServiceRecord[]
 
   @@map("vehicles")
 }
@@ -70,6 +71,32 @@ model VehicleImage {
   createdAt DateTime @default(now())
 
   @@map("vehicle_images")
+}
+
+// ---------------------------------------------------------------------------
+// ServiceRecord (servisna knjižica)
+// ---------------------------------------------------------------------------
+
+// Jedna intervencija u servisnoj knjižici vozila. `provider` je namjerno
+// slobodan tekst (ne relacija/enum) - strukturiranje radi buduće AI
+// kategorizacije računa je poseban budući zadatak, ne dio ovog opsega.
+// `cost` je uvijek u EUR (isti valutni pretpostavka kao Contract.pricePerDay/
+// excessAmount - app nema multi-currency podršku nigdje).
+model ServiceRecord {
+  id          String   @id @default(cuid())
+  vehicleId   String
+  vehicle     Vehicle  @relation(fields: [vehicleId], references: [id], onDelete: Cascade)
+  date        DateTime
+  description String
+  cost        Float
+  provider    String?
+  receiptKey  String? // račun/dokument (S3 key na Hetzneru, ne raw URL)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([vehicleId])
+  @@map("service_records")
 }
 
 // ---------------------------------------------------------------------------

@@ -4,7 +4,92 @@ Dinamički log stanja projekta. Ažurira se na kraju svake sesije. Za statičnu
 arhitekturu/konvencije vidi [CLAUDE.md](CLAUDE.md) — ovaj dokument je "što je
 gotovo i zašto", ne "kako treba izgledati".
 
-**Zadnje ažurirano:** 2026-08-24, dvadesetpeti nastavak - korisnik zatražio
+**Zadnje ažurirano:** 2026-08-24, dvadesetšesti nastavak - korisnik zatražio
+punu servisnu knjižicu (web) - dosad je bio samo "uskoro" placeholder tab.
+
+**1) Novi `ServiceRecord` model.** `vehicleId` (FK, `onDelete: Cascade` -
+isti obrazac kao `VehicleImage`), `date`, `description`, `cost` (Float, EUR -
+app nema multi-currency nigdje), `provider` (slobodan tekst - **namjerno NE
+strukturirano/enum**, korisnik eksplicitno rekao da je AI kategorizacija
+računa poseban budući zadatak), `receiptKey` (opcionalan S3 key, isti
+`*Key`-na-frontend-nikad-raw obrazac kao ostali dokumenti). Migracija ručno
+napisana (isti razlog kao prijašnjih deset nastavaka), primijenjena `prisma
+migrate deploy` izravno na produkciju - **korisnik pitan za potvrdu prije
+pokretanja**, odobreno.
+
+**2) Server (`server/serviceRecords.ts`).** `listServiceRecordsForVehicle`
+sortira po `date` opadajuće (**ne `createdAt`** - vlasnik unosi zapise
+retroaktivno, npr. stari račun tjedan dana kasnije, pa je datum intervencije
+relevantniji od trenutka unosa). `createServiceRecord`/`deleteServiceRecord`
+(potonji briše i S3 račun ako postoji). **Ukupan trošak se NE računa
+server-side** (nema agregatnog upita/polja na `VehicleDTO`) - lista je već
+učitana za prikaz, klijent zbraja `reduce` nad istim nizom, isti "flota je
+mala, ne paginira se" obrazac kao svugdje drugdje u appu.
+
+**Usput uhvaćena i popravljena pre-postojeća rupa u `deleteVehicle`**
+(`server/vehicles.ts`) - funkcija je već čistila S3 objekte za `images`/
+`registrationDocKey`/`insurancePolicyKey` prije brisanja vozila, ali NIJE
+znala za novi `serviceRecords` cascade (DB redci bi se sami obrisali FK
+cascadeom, ali S3 računi bi ostali osiročeni, trajno nedostupni ali
+zauzimaju prostor). Prošireno da prije brisanja vozila obriše i sve
+`receiptKey` S3 objekte servisnih zapisa - isti obrazac kao već postojeći
+`images` cleanup iznad.
+
+**3) API rute.** `POST /api/vehicles/[id]/service-records` prima
+`multipart/form-data` (ne JSON) - **jedan request za formu + opcionalan
+upload** (isti server-side-buffer-upload obrazac kao `registration-doc`/
+`insurance-policy` rute, ne presigned-URL obrazac koji signing wizard
+koristi - fajl je malen, jedan po requestu). `serviceRecordCreateSchema.cost`
+koristi `z.coerce.number()` (ne `z.number()`) upravo zbog ovoga - FormData
+vrijednosti stižu kao string, coerce ih transparentno pretvara neovisno o
+pozivatelju. `GET` (`requireOwnerSession`, isti "listing ostaje otvoren"
+obrazac kao ostale vehicle/contract GET rute) i `DELETE .../[recordId]`
+(`requireModulePermission(request, "vehicles")`).
+
+**4) UI (`/vehicles/[id]`, "Servisna knjižica" tab - zamijenjen stari
+placeholder).** Ukupan trošak istaknut na vrhu (`reduce` nad učitanom
+listom, `.toFixed(2)` + "€"). Forma "Nova intervencija" (datum/opis/trošak/
+servis/opcionalan file input za račun) iznad tablice povijesti (najnovije
+prvo, s "pregledaj" linkom na račun ako postoji, "Obriši" po retku).
+Servisni zapisi se učitavaju NEOVISNO o aktivnom tabu (isti obrazac kao
+`contracts` - spreman čim se tab otvori, bez dodatnog loading treptaja).
+
+**5) Vezano na "na servisu" toggle (korisnikov eksplicitan zahtjev da se
+razmisli, ne obavezno vezati).** Checkbox "Vozilo je trenutno na servisu" u
+formi za unos - **prikazan SAMO ako vozilo već nije na servisu**
+(`vehicle.underService === false`, nema smisla nuditi toggle na već-uključeno
+stanje). Nije dio `service-records` POST tijela - odvojen `PATCH
+/api/vehicles/[id]` poziv NAKON uspješnog kreiranja zapisa (reuse postojeće
+rute iz prošlog nastavka, isti mehanizam kao toggle gumb pored naslova),
+poslan samo ako je checkbox stvarno označen. Namjerno labava veza (dvije
+odvojene mutacije iza jednog klika), ne jedna atomична transakcija - servisni
+zapis se svejedno sprema i ako drugi poziv iz nekog razloga padne, umjesto
+da cijeli unos propadne zbog sporedne, ne-kritične radnje.
+
+**Verifikacija.** `tsc --noEmit` čist na sva tri paketa (nakon što je
+`apps/web/.next` cache ponovno očišćen - isti poznati gotcha kao prošli
+nastavak, referencirao je uklonjenu debug rutu), `next build` čist (nove
+rute `/api/vehicles/[id]/service-records` + `/service-records/[recordId]`
+vidljive). **Stvaran end-to-end test protiv produkcijske baze** (privremena
+debug ruta bez auth-a, imenovana BEZ `_` prefiksa - naučeno prošli nastavak
+da Next.js `_`-prefiksirani folderi tiho 404-aju): 7 provjera, sve prošle -
+(1) `serviceRecordCreateSchema` parsira FormData string vrijednosti u pravi
+`number` tip (`z.coerce` radi kako treba), (2) zapis s pravim uploadanim
+računom (mala PNG, stvaran Hetzner upload) ima `receiptUrl`, (3) zapis bez
+računa ispravno `null`, (4) lista vraća oba, sortirana najnovije-prvo,
+zbroj troškova točan (523.45 = 123.45+400), (5) presigned `receiptUrl`
+stvarno resolva (`fetch` vratio `200`), (6) `deleteServiceRecord` briše i S3
+objekt (isti URL nakon toga `404`), (7) lista nakon brisanja ispravno ima
+samo preostali zapis. Test podaci (1 vozilo, service recordi) obrisani u
+`finally` bloku, **eksplicitno potvrđeno upitom nad produkcijskom bazom**
+(`serviceRecord.count()` `0`, nema zaostalih `TestMake` vozila). Debug ruta
+uklonjena (`git status` potvrđuje čist diff). Nije testirano kroz pravi
+owner login klik u browseru (magic-link auth) - isti razlog kao svugdje
+ranije u ovom logu.
+
+---
+
+**Prijašnji dio (dvadesetpeti nastavak)** - korisnik zatražio
 prebacivanje prošlog nastavka (status vozila/prijevremeno zatvaranje/blokada
 duplog ugovora) na owner-mobile (Expo). Čisto UI zadatak - backend je već
 dijeljen kroz `@rent-a-car/api`, isti API pozivi kao web.

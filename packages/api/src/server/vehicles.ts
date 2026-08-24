@@ -122,12 +122,16 @@ export async function updateVehicle(
 export async function deleteVehicle(id: string): Promise<void> {
   const vehicle = await prisma.vehicle.findUnique({
     where: { id },
-    include: { images: true },
+    include: { images: true, serviceRecords: { where: { receiptKey: { not: null } } } },
   });
   if (!vehicle) return;
 
   await Promise.all([
     ...vehicle.images.map((image: VehicleImage) => deleteObject(image.key)),
+    // ServiceRecord.vehicle je onDelete: Cascade (isto kao VehicleImage) -
+    // DB retci se sami obrišu, ali S3 računi ne bi bez ovoga (isti razlog
+    // kao slike vozila niže).
+    ...vehicle.serviceRecords.map((record) => deleteObject(record.receiptKey!)),
     vehicle.registrationDocKey ? deleteObject(vehicle.registrationDocKey) : Promise.resolve(),
     vehicle.insurancePolicyKey ? deleteObject(vehicle.insurancePolicyKey) : Promise.resolve(),
   ]);
