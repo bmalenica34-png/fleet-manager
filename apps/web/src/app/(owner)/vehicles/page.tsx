@@ -7,6 +7,7 @@ import { formatDateHr } from "@rent-a-car/api";
 export default function VehiclesPage() {
   const [vehicles, setVehicles] = useState<VehicleDTO[]>([]);
   const [loading, setLoading] = useState(true);
+  const [search, setSearch] = useState("");
 
   async function load() {
     setLoading(true);
@@ -25,6 +26,18 @@ export default function VehiclesPage() {
     load();
   }
 
+  // Client-side filter - flota je malena (isti obrazac kao ostale liste u
+  // appu, ne paginira se).
+  const filteredVehicles = vehicles.filter((v) => {
+    const q = search.trim().toLowerCase();
+    if (!q) return true;
+    return (
+      v.make.toLowerCase().includes(q) ||
+      v.model.toLowerCase().includes(q) ||
+      v.licensePlate.toLowerCase().includes(q)
+    );
+  });
+
   return (
     <div>
       <div className="toolbar">
@@ -34,10 +47,18 @@ export default function VehiclesPage() {
         </a>
       </div>
 
+      <input
+        type="search"
+        placeholder="Pretraži po marki, modelu ili registraciji..."
+        value={search}
+        onChange={(e) => setSearch(e.target.value)}
+        style={{ marginBottom: "1rem", maxWidth: 320 }}
+      />
+
       {loading ? (
         <p className="muted">Učitavanje...</p>
-      ) : vehicles.length === 0 ? (
-        <p className="muted">Nema unesenih vozila.</p>
+      ) : filteredVehicles.length === 0 ? (
+        <p className="muted">{vehicles.length === 0 ? "Nema unesenih vozila." : "Nema rezultata pretrage."}</p>
       ) : (
         <table>
           <thead>
@@ -51,7 +72,7 @@ export default function VehiclesPage() {
             </tr>
           </thead>
           <tbody>
-            {vehicles.map((v) => (
+            {filteredVehicles.map((v) => (
               <tr key={v.id}>
                 <td>
                   <a href={`/vehicles/${v.id}`}>

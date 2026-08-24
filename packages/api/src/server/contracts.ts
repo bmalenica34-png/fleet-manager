@@ -144,6 +144,13 @@ export async function createContractAndSendSigningEmail(
     prisma.client.findUniqueOrThrow({ where: { id: input.clientId } }),
   ]);
 
+  // TODO (samo ako owner kasnije eksplicitno zatraži): ovdje bi išla
+  // provjera kompletnosti klijentovih dokumenata (osobna+vozačka, obje
+  // strane - vidi getClientWithDocuments u ./clients.ts) da IZDAVANJE
+  // ugovora blokira dok dokumenti ne nedostaju. Trenutno namjerno NE
+  // blokira - klijentova stranica u UI-u samo upozorava, izdavanje ugovora
+  // uvijek prolazi neovisno o statusu dokumenata.
+
   const contract = await prisma.contract.create({
     data: {
       vehicleId: input.vehicleId,

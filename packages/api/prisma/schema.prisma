@@ -212,8 +212,27 @@ model Client {
   email             String
   phone             String
   address           String?
+  // Zadržano iz signing wizarda (packages/api/src/server/signing.ts) - klijent
+  // uploada jednu (prednju) stranu svakog dokumenta kao dio obaveznog
+  // potpisnog flowa. NIJE preimenovano/uklonjeno da se ne dira taj kritičan,
+  // već testiran put (vidi bug #30/#37 u PROGRESS.md) - umjesto toga nova
+  // polja niže dodaju stražnju stranu + omogućuju owneru da upravlja
+  // dokumentima izravno sa stranice klijenta. Kompletnost se računa kao
+  // "postoji BILO ILI dedicated *FrontKey ILI ovo starije polje" (vidi
+  // toClientDTO u server/clients.ts) - klijent koji je već prošao signing
+  // ne smije lažno ispasti "nedostaje" samo zato što polje ima drugo ime.
   driverLicenseKey  String?
   idDocumentKey     String?
+
+  // Novi slotovi - dodani da bi se moglo pratiti KOMPLETNOST identifikacijskih
+  // dokumenata (osobna + vozačka, obje strane), potrebno za dokaznost tko je
+  // vozio vozilo u slučaju prometnog prekršaja. Upravljaju se sa stranice
+  // klijenta (owner), odvojeno od signing wizarda.
+  idDocumentFrontKey     String?
+  idDocumentBackKey      String?
+  driverLicenseFrontKey  String?
+  driverLicenseBackKey   String?
+
   // Poveže se s Supabase auth accountom kad se klijent registrira/potvrdi.
   // Nullable jer klijent može kompletirati cijeli signing flow bez accounta.
   userId            String?  @unique

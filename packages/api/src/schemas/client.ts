@@ -19,3 +19,14 @@ export type ClientCreateInput = z.infer<typeof clientCreateSchema>;
 
 export const clientUpdateSchema = clientCreateSchema.partial();
 export type ClientUpdateInput = z.infer<typeof clientUpdateSchema>;
+
+// Dokumenti klijenta (osobna/vozačka, obje strane) - upravljani sa stranice
+// klijenta, odvojeno od create/update forme iznad. Vidi server/clients.ts.
+export const CLIENT_DOCUMENT_SLOTS = [
+  "idDocumentFront",
+  "idDocumentBack",
+  "driverLicenseFront",
+  "driverLicenseBack",
+] as const;
+export const clientDocumentSlotSchema = z.enum(CLIENT_DOCUMENT_SLOTS);
+export type ClientDocumentSlot = z.infer<typeof clientDocumentSlotSchema>;

@@ -4,7 +4,104 @@ Dinamički log stanja projekta. Ažurira se na kraju svake sesije. Za statičnu
 arhitekturu/konvencije vidi [CLAUDE.md](CLAUDE.md) — ovaj dokument je "što je
 gotovo i zašto", ne "kako treba izgledati".
 
-**Zadnje ažurirano:** 2026-08-24, dvadesetprvi nastavak - korisnik zatražio
+**Zadnje ažurirano:** 2026-08-24, dvadesetdrugi nastavak - korisnik zatražio
+search barove za vozila/klijente, rental history + date-range filter po
+vozilu, istaknut aktivan ugovor, i provjeru kompletnosti klijentovih
+dokumenata (osobna+vozačka, obje strane).
+
+**1) Search barovi.** Client-side filter (flota/klijenti su mali, isti
+obrazac kao ostale liste u appu - ne paginira se) na `/vehicles` (marka/
+model/registracija) i `/clients` (ime/OIB). **"Broj osobne" NAMJERNO
+izostavljen iz pretrage** - to nije pohranjeno kao tekstualno polje nigdje
+u shemi (samo skenirana slika dokumenta), pa se ne može tekstualno
+pretraživati bez OCR ekstrakcije koju korisnik eksplicitno traži da se ne
+dira.
+
+**2) Rental history po vozilu.** `/vehicles/[id]` Ugovori tab: lista
+sortirana po `dateFrom` opadajuće (najnovije prvo, bilo je nesortirano
+prije), plus date-range filter (od/do inputi) po PREKLAPANJU razdoblja
+najma s odabranim rasponom (ne strogo "unutar" - prazna granica = bez
+ograničenja).
+
+**3) Aktivan ugovor istaknut.** Novi banner (zelen, `status === "signed"`
+i danas unutar `dateFrom`/`dateTo`) prikazan ODMAH ISPOD naslova vozila,
+IZNAD tabova - vidljiv bez obzira koji je tab aktivan i bez scrollanja čak
+i kad je default tab "Podaci o vozilu" (ne "Ugovori"), točno kako je
+korisnik tražio ("ne zakopan u listi povijesti ispod").
+
+**4) Kompletnost klijentovih dokumenata.** Provjeren postojeći Client
+model prije početka (korisnikov eksplicitan zahtjev) - postojala su samo 2
+slota (`driverLicenseKey`/`idDocumentKey`, JEDNA strana svaki, popunjena
+isključivo kroz signing wizard). Dodana 4 NOVA slota
+(`idDocumentFrontKey`/`idDocumentBackKey`/`driverLicenseFrontKey`/
+`driverLicenseBackKey`) - stari 2 polja ZADRŽANA netaknuta (ne
+preimenovana/uklonjena - i dalje ih signing wizard piše, taj kritičan,
+već testiran put nije diran). Kompletnost/prikaz koristi fallback: "prednja
+strana" broji se kao prisutna ako postoji ILI dedicated `*FrontKey` ILI
+starije polje (`idDocumentFrontKey ?? idDocumentKey`, isto za vozačku) -
+klijent koji je već prošao signing ne ispada lažno "nedostaje", iako
+tehnički nikad nije koristio nova polja. Nema fallbacka za stražnju stranu
+(ta nikad nije postojala prije ove promjene).
+
+Nova `/clients/[id]` stranica (prije nije postojala nijedna client-detail
+ruta) - osnovni podaci, 4 kartice dokumenata (isti staged-preview + "Spremi"
+obrazac kao prometna/polica na vozilu), jasan warning banner "Nedostaje: X,
+Y" (amber) ili "Svi dokumenti su priloženi" (zelen), upload izravno sa
+stranice bez preusmjeravanja. Usput dodana i lagana "Ugovori" sekcija (bez
+date-range filtera - taj je specifično tražen samo za vozila) jer prirodno
+odgovara duhu zahtjeva "pregled povijesti... za klijente" iz naslova
+zadatka. `/clients` lista sad linkuje svaki redak na novu stranicu.
+
+**Namjerno NE blokira izdavanje ugovora** ako dokumenti nedostaju - samo UI
+upozorenje na `/clients/[id]`. Ostavljen TODO komentar u
+`createContractAndSendSigningEmail` (`server/contracts.ts`) - prirodno
+mjesto gdje bi buduća blokada išla ako korisnik kasnije to zatraži
+eksplicitno.
+
+**Napomena o razdvajanju od OCR-a** (korisnikov eksplicitan zahtjev) - ovaj
+rad je ČISTO o prisutnosti/dostupnosti slika dokumenata, nema nikakve
+ekstrakcije podataka iz njih. Postojeći OCR moduli (`packages/api/src/ocr/`)
+nisu dirani.
+
+**Migracija** (ručno napisana, isti razlog kao prijašnjih pet nastavaka -
+shadow-DB replay pada na pre-postojećoj migraciji) - samo 4 nova nullable
+stupca na `clients`, bez podatkovnih promjena (fallback logika je čisto
+runtime, ne backfill).
+
+**Verifikacija.** `tsc --noEmit` čist na sva tri paketa, `next build` čist
+(`/clients/[id]`, `/api/clients/[id]`, `/api/clients/[id]/documents`
+vidljivi u outputu). **Stvaran end-to-end test protiv produkcijske baze**
+(privremena debug ruta, isti obrazac kao prijašnjih pet nastavaka): (a)
+vozilo s 3 fabricirana ugovora (prošli/aktivni/budući) - detekcijska logika
+identična onoj u UI-u ispravno prepoznala TOČNO jedan aktivan (onaj s
+`status:"signed"` i danas unutar raspona), date-range filter (overlap
+logika) ispravno uključio prošli+aktivni a isključio budući ugovor; (b)
+test klijent SA starijim `idDocumentKey` (simulira signing-wizard upload)
+potvrdio da `idDocumentFrontUrl` DTO polje ispravno pada natrag na to
+starije polje (fallback radi), dok stražnja strana ostaje ispravno
+"nedostaje" (nema fallbacka); (c) svježi klijent bez ijednog dokumenta →
+sva 4 slota "nedostaje" potvrđeno → 4 stvarna upload poziva na Hetzner
+(`setClientDocument`) jedan po jedan → broj prisutnih dokumenata rastao
+točno `[1,2,3,4]` (korisnikov test scenarij "uploadaj jedan po jedan,
+provjeri da status ispravno nestaje" potvrđen izravno) → presigned URL
+finalnog uploada stvarno resolva (`curl` vratio `200`). Test podaci (2
+vozila, 3 ugovora, 3 klijenta, 4 S3 objekta) obrisani nakon verifikacije -
+**usput uhvaćena vlastita greška u čišćenju** (isti obrazac kao prijašnji
+nastavak): slučajan ponovni `curl` na debug rutu je ponovno stvorio cijeli
+test set, uhvaćeno odmah (ne pretpostavkom da je prvo čišćenje dovoljno),
+identificirano po `_cleanupIds` u odgovoru i počišćeno drugim DELETE
+pozivom s točnim id-jevima. Debug ruta uklonjena nakon verifikacije
+(`git status` potvrđuje čist diff, bez privremenih exporta ovaj put - nije
+trebao nikakav "TEMP" re-export iz `server/index.ts` jer su sve korištene
+funkcije već bile trajno izvezene iz prijašnjih nastavaka). Nije testirano
+kroz pravi owner login klik (stvaran `/vehicles/[id]`/`/clients/[id]` UI
+prikaz) - isti razlog kao svugdje ranije u ovom logu (magic-link browser
+test ocijenjen preskupim za ovu klasu promjene), oslonjeno na
+tsc+build+izravno testiranu podatkovnu logiku iza UI-a.
+
+---
+
+**Prijašnji dio (dvadesetprvi nastavak)** - korisnik zatražio
 versionirane uvjete korištenja (T&C) s uređivanjem u postavkama i pravim PDF
 prilogom uz svaki potpisan ugovor. Prije početka provjereno gdje uvjeti
 trenutno žive (korisnikov eksplicitan zahtjev): hardkodirani

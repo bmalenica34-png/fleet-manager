@@ -8,6 +8,7 @@ export default function ClientsPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [search, setSearch] = useState("");
 
   async function load() {
     setLoading(true);
@@ -51,14 +52,32 @@ export default function ClientsPage() {
     load();
   }
 
+  // Client-side filter - broj klijenata je malen (isti obrazac kao ostale
+  // liste u appu, ne paginira se), pretraga po imenu ili OIB-u. "Broj
+  // osobne" NIJE trenutno pohranjen kao tekstualno polje (samo skenirana
+  // slika, vidi /clients/[id] dokumenti sekciju) pa nije uključen u pretragu.
+  const filteredClients = clients.filter((c) => {
+    const q = search.trim().toLowerCase();
+    if (!q) return true;
+    return `${c.firstName} ${c.lastName}`.toLowerCase().includes(q) || c.oib.includes(q);
+  });
+
   return (
     <div>
       <h1>Klijenti</h1>
 
+      <input
+        type="search"
+        placeholder="Pretraži po imenu ili OIB-u..."
+        value={search}
+        onChange={(e) => setSearch(e.target.value)}
+        style={{ marginBottom: "1rem", maxWidth: 320 }}
+      />
+
       {loading ? (
         <p className="muted">Učitavanje...</p>
-      ) : clients.length === 0 ? (
-        <p className="muted">Nema unesenih klijenata.</p>
+      ) : filteredClients.length === 0 ? (
+        <p className="muted">{clients.length === 0 ? "Nema unesenih klijenata." : "Nema rezultata pretrage."}</p>
       ) : (
         <table>
           <thead>
@@ -70,10 +89,12 @@ export default function ClientsPage() {
             </tr>
           </thead>
           <tbody>
-            {clients.map((c) => (
+            {filteredClients.map((c) => (
               <tr key={c.id}>
                 <td>
-                  {c.firstName} {c.lastName}
+                  <a href={`/clients/${c.id}`}>
+                    {c.firstName} {c.lastName}
+                  </a>
                 </td>
                 <td>{c.oib}</td>
                 <td>{c.email}</td>

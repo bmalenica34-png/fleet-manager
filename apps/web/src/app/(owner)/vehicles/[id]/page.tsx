@@ -47,6 +47,8 @@ export default function VehicleDetailPage() {
   const [activeTab, setActiveTab] = useState<VehicleTab>("info");
   const [contracts, setContracts] = useState<VehicleContractItem[]>([]);
   const [contractsLoading, setContractsLoading] = useState(true);
+  const [historyFrom, setHistoryFrom] = useState("");
+  const [historyTo, setHistoryTo] = useState("");
 
   const [make, setMake] = useState("");
   const [customMake, setCustomMake] = useState("");
@@ -120,6 +122,26 @@ export default function VehicleDetailPage() {
   }, []);
 
   const vehicleContracts = contracts.filter((c) => c.vehicleId === vehicleId);
+
+  // Aktivan ugovor - status "signed" i danas je unutar dateFrom/dateTo.
+  // Prikazan istaknuto iznad tabova (vidi JSX niže), ne zakopan u listi
+  // povijesti u "Ugovori" tabu.
+  const now = new Date();
+  const activeContract = vehicleContracts.find(
+    (c) => c.status === "signed" && new Date(c.dateFrom) <= now && new Date(c.dateTo) >= now
+  );
+
+  // Povijest, najnovije prvo (po dateFrom) + opcionalan date-range filter
+  // (od/do) - filtrira po preklapanju razdoblja najma s odabranim rasponom,
+  // ne po strogom "unutar" - prazna granica znači neograničeno.
+  const sortedVehicleContracts = [...vehicleContracts].sort(
+    (a, b) => new Date(b.dateFrom).getTime() - new Date(a.dateFrom).getTime()
+  );
+  const filteredVehicleContracts = sortedVehicleContracts.filter((c) => {
+    if (historyFrom && new Date(c.dateTo) < new Date(historyFrom)) return false;
+    if (historyTo && new Date(c.dateFrom) > new Date(historyTo)) return false;
+    return true;
+  });
 
   // Marka/model/godina su controlled selecti (za cascading model-popis i
   // "Ostalo" custom unos) - ostala polja i dalje idu kroz defaultValue +
@@ -485,6 +507,33 @@ export default function VehicleDetailPage() {
         {vehicle.make} {vehicle.model}
       </h1>
 
+      {activeContract && (
+        <div
+          style={{
+            padding: "0.75rem 1rem",
+            marginBottom: "1rem",
+            border: "1px solid #16a34a",
+            borderRadius: "6px",
+            background: "#f0fdf4",
+            color: "#166534",
+          }}
+        >
+          <strong>Aktivan ugovor br. {activeContract.number}</strong> - {activeContract.client.firstName}{" "}
+          {activeContract.client.lastName}, {formatDateHr(activeContract.dateFrom)} –{" "}
+          {formatDateHr(activeContract.dateTo)}
+          {activeContract.contractPdfUrl && (
+            <>
+              {" "}
+              (
+              <a href={activeContract.contractPdfUrl} target="_blank" rel="noreferrer">
+                PDF
+              </a>
+              )
+            </>
+          )}
+        </div>
+      )}
+
       <div className="toolbar" style={{ justifyContent: "flex-start", gap: "0.5rem" }}>
         {TABS.map((tab) => (
           <button
@@ -739,10 +788,35 @@ export default function VehicleDetailPage() {
 
       {activeTab === "contracts" && (
         <div style={{ marginTop: "2rem" }}>
+          <div style={{ display: "flex", gap: "1rem", alignItems: "flex-end", marginBottom: "1rem" }}>
+            <label>
+              Od
+              <input type="date" value={historyFrom} onChange={(e) => setHistoryFrom(e.target.value)} />
+            </label>
+            <label>
+              Do
+              <input type="date" value={historyTo} onChange={(e) => setHistoryTo(e.target.value)} />
+            </label>
+            {(historyFrom || historyTo) && (
+              <button
+                type="button"
+                className="btn"
+                onClick={() => {
+                  setHistoryFrom("");
+                  setHistoryTo("");
+                }}
+              >
+                Poništi filter
+              </button>
+            )}
+          </div>
+
           {contractsLoading ? (
             <p className="muted">Učitavanje...</p>
-          ) : vehicleContracts.length === 0 ? (
-            <p className="muted">Nema ugovora za ovo vozilo.</p>
+          ) : filteredVehicleContracts.length === 0 ? (
+            <p className="muted">
+              {vehicleContracts.length === 0 ? "Nema ugovora za ovo vozilo." : "Nema ugovora u odabranom razdoblju."}
+            </p>
           ) : (
             <table>
               <thead>
@@ -756,7 +830,7 @@ export default function VehicleDetailPage() {
                 </tr>
               </thead>
               <tbody>
-                {vehicleContracts.map((c) => (
+                {filteredVehicleContracts.map((c) => (
                   <tr key={c.id}>
                     <td>{c.number}</td>
                     <td>{formatDateHr(c.dateFrom)}</td>
