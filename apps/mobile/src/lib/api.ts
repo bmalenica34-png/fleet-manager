@@ -173,7 +173,13 @@ export interface PickedFile {
 async function uploadPickedFile<T = unknown>(
   path: string,
   file: PickedFile,
-  fieldName: string
+  fieldName: string,
+  // Dodatna text polja poslana UZ fajl u istom multipart requestu (npr.
+  // servisni zapis: datum/opis/trošak/servis + opcionalan račun u jednom
+  // POST-u, isti "jedan request za formu + upload" obrazac kao web-ova
+  // service-records ruta) - expo-file-system-ov File.upload() to podržava
+  // izvorno preko `parameters`, nema potrebe za ručnim multipart body-jem.
+  parameters?: Record<string, string>
 ): Promise<T> {
   const {
     data: { session },
@@ -195,6 +201,7 @@ async function uploadPickedFile<T = unknown>(
       httpMethod: "POST",
       mimeType: file.mimeType || "application/octet-stream",
       headers,
+      parameters,
       signal: controller.signal,
     });
   } catch (err) {
@@ -408,6 +415,66 @@ export function parseVehicleActiveContractConflict(err: unknown): ActiveContract
 
 export function requestContractPhotos(contractId: string): Promise<unknown> {
   return apiFetch(`/api/contracts/${contractId}/photo-requests`, { method: "POST" });
+}
+
+// --- Servisna knjižica ---
+export interface ServiceRecordDTO {
+  id: string;
+  vehicleId: string;
+  date: string;
+  description: string;
+  cost: number;
+  provider: string | null;
+  receiptUrl: string | null;
+  createdAt: string;
+}
+
+export interface ServiceRecordCreateInput {
+  date: string; // "YYYY-MM-DD"
+  description: string;
+  cost: number;
+  provider?: string;
+}
+
+export function listServiceRecords(vehicleId: string): Promise<ServiceRecordDTO[]> {
+  return apiFetch(`/api/vehicles/${vehicleId}/service-records`);
+}
+
+/**
+ * Bez računa - obična multipart FormData s SAMO text poljima (ne file
+ * part), pa RN-ov FormData most radi normalno (poznat bug pogađa isključivo
+ * file partove - vidi komentar iznad uploadPickedFile). Ruta prima
+ * isključivo multipart/form-data (ne JSON), pa čak i bez fajla mora ići
+ * FormData tijelo.
+ */
+export function createServiceRecord(
+  vehicleId: string,
+  input: ServiceRecordCreateInput
+): Promise<ServiceRecordDTO> {
+  const formData = new FormData();
+  formData.append("date", input.date);
+  formData.append("description", input.description);
+  formData.append("cost", String(input.cost));
+  if (input.provider) formData.append("provider", input.provider);
+  return apiFetch(`/api/vehicles/${vehicleId}/service-records`, { method: "POST", body: formData });
+}
+
+/** S računom - jedan multipart request za formu + upload (isti obrazac kao web). */
+export function createServiceRecordWithReceipt(
+  vehicleId: string,
+  input: ServiceRecordCreateInput,
+  receipt: PickedFile
+): Promise<ServiceRecordDTO> {
+  return uploadPickedFile(`/api/vehicles/${vehicleId}/service-records`, receipt, "receipt", {
+    date: input.date,
+    description: input.description,
+    cost: String(input.cost),
+    ...(input.provider ? { provider: input.provider } : {}),
+  });
+}
+
+export function deleteServiceRecord(vehicleId: string, recordId: string): Promise<void> {
+  return apiFetch(`/api/vehicles/${vehicleId}/service-records/${recordId}`, { method: "DELETE" });
 }
 
 // --- Statistika/profitabilnost ---

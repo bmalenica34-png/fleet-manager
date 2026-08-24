@@ -4,7 +4,82 @@ Dinamički log stanja projekta. Ažurira se na kraju svake sesije. Za statičnu
 arhitekturu/konvencije vidi [CLAUDE.md](CLAUDE.md) — ovaj dokument je "što je
 gotovo i zašto", ne "kako treba izgledati".
 
-**Zadnje ažurirano:** 2026-08-24, dvadesetosmi nastavak - korisnik zatražio
+**Zadnje ažurirano:** 2026-08-24, dvadesetdeveti nastavak - korisnik zatražio
+("odradi i na mobitelu") portanje Servisne knjižice na owner-mobile - poznat
+gap eksplicitno flaggan u prošlom nastavku (mobile "Servis" tab je i dalje
+pokazivao "uskoro" placeholder, puna funkcionalnost postojala je samo na
+webu). Zatvara zadnji preostali web-only owner-facing gap pod novom
+paritetnom politikom ([[feedback_mobile_web_parity]]).
+
+**Novo u `src/lib/api.ts` - podrška za "forma + opcionalan upload u jednom
+requestu" preko `expo-file-system`-a.** Web-ova `POST /api/vehicles/[id]/
+service-records` ruta prima multipart/form-data s text poljima
+(datum/opis/trošak/servis) I opcionalnim `receipt` file poljem u ISTOM
+requestu - postojeći `uploadPickedFile` helper (koristi `File.upload()` iz
+`expo-file-system`, izbjegava poznat "Unsupported FormDataPart
+implementation" Android bug za file partove) je prije slao SAMO jedan file
+part, bez načina da priloži dodatna text polja. **Pronađen i iskorišten
+službeni `parameters?: Record<string,string>` parametar** u
+`UploadOptions` tipu (`expo-file-system` 57.0.2, provjeren izravno u
+paketovim `.d.ts` fajlovima prije korištenja, ne nagađanjem - AGENTS.md u
+`apps/mobile` eksplicitno traži provjeru točnih verzioniranih API-ja prije
+pisanja koda) - dodaje text polja UZ file part u isti multipart body,
+izvorna native podrška, bez ručnog sastavljanja multipart tijela.
+`uploadPickedFile` proširen 4. opcionalnim argumentom (`parameters`) -
+NEOVISNO postojeća 3 poziva (registration-doc/insurance-policy) rade
+identično kao prije (default `undefined`).
+
+**Dva puta za kreiranje ovisno o postojanju računa:** `createServiceRecord`
+(BEZ fajla) šalje običan `FormData` kroz postojeći `apiFetch` - safe jer
+poznat Android bug pogađa isključivo FILE partove, ne text-only FormData
+(potvrđeno čitanjem točnog opisa buga u postojećem komentaru prije
+pretpostavke da će raditi). `createServiceRecordWithReceipt` (S fajlom)
+koristi prošireni `uploadPickedFile` s `fieldName: "receipt"`.
+
+**UI (`owner/vehicles/[id].tsx`, "Servis" tab - zamijenjen stari
+placeholder).** 1:1 replika web sekcije: ukupan trošak na vrhu, forma
+(datum kao DD.MM.GGGG. tekstualno polje + `parseHrDateToIso`, isti obrazac
+kao "Datum isteka registracije" polje već u ovom fajlu - nema native date
+pickera niti u ovom fajlu niti u statistici iz prošlog nastavka, dosljedno),
+`DocumentPicker` za račun (isti `image/*`+`application/pdf` accept kao
+prometna/polica), povijest intervencija ispod (datum/trošak/opis/servis/
+link na račun/gumb za brisanje). **Checkbox "Vozilo je trenutno na
+servisu"** - RN nema built-in checkbox i repo nema instaliran nijedan
+checkbox paket, pa je implementiran kao toggle-ivi "chip" (isti UI
+element koji ovaj fajl već koristi za marku/model/godinu/status-preset
+odabire) s ✓ prefiksom kad je aktivan - vizualno različit od pravog
+checkboxa ali funkcionalno identičan, bez nove ovisnosti. Prikazan SAMO
+ako vozilo već nije na servisu (isto pravilo kao web). Isti "labava veza"
+obrazac kao web - odvojen `updateVehicle` PATCH poziv NAKON uspješnog
+kreiranja zapisa, ne atomski dio istog requesta.
+
+**Usput uhvaćena i popravljena vlastita greška prije verifikacije:**
+`handleDeleteServiceRecord` prve verzije nije imao `catch` blok (samo
+`try/finally`) - neuspjelo brisanje bi tiho propalo bez ikakve povratne
+informacije korisniku, nekonzistentno s VEĆ POSTOJEĆIM `handleCloseContract`
+u istom fajlu (koji ima namjeran `catch` + dedicated `closeContractError`
+state). Popravljeno dodavanjem istog obrasca (`serviceRecordError`, već
+prikazan u UI-u ispod forme).
+
+**Verifikacija.** `tsc --noEmit` čist na sva tri paketa. Backend logika
+(`server/serviceRecords.ts`, API rute) je NEDIRANA i već izravno testirana
+protiv produkcijske baze prije dva nastavka (7/7 provjera) - ovaj nastavak
+je čisto UI+upload sloj koji poziva iste, već potvrđene rute, isti obrazac
+verifikacije kao svaki prijašnji mobile-port nastavak (ne ponavlja
+low-level test dijeljene logike koja nije mijenjana). **Nova
+`parameters`-based multipart upload putanja (jedini stvarno nov mehanizam
+ovaj nastavak) NIJE live-testirana** - zahtijeva stvaran fizički
+uređaj/simulator (isti razlog kao svaki mobile nastavak, nema spojen
+uređaj u ovom okruženju) - `.d.ts` provjera potvrđuje da API postoji i
+ima očekivan oblik, ali stvaran multipart request na Android/iOS uređaju
+nije proveden. **Ovo je jedini dio ove promjene koji korisnik treba
+osobno provjeriti na uređaju prije nego se smatra potpuno gotovim**
+(dodaj servisni zapis S računom, potvrdi da se stvarno uploada i
+prikazuje).
+
+---
+
+**Prijašnji dio (dvadesetosmi nastavak)** - korisnik zatražio
 statistiku/profitabilnost po vozilu na owner-mobileu (web dio već gotov u
 prošlom nastavku) - **korisnik eksplicitno postavio novu trajnu politiku**:
 "od sad mobile MORA imati sve mogućnosti kao web, ne dodavati ga naknadno

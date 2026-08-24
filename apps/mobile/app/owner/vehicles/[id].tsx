@@ -26,10 +26,14 @@ import {
 } from "@rent-a-car/api";
 import {
   closeContract,
+  createServiceRecord,
+  createServiceRecordWithReceipt,
+  deleteServiceRecord,
   deleteVehicleImage,
   getVehicle,
   getVehicleStats,
   listContracts,
+  listServiceRecords,
   ocrInsurancePolicy,
   ocrRegistrationDocInner,
   ocrRegistrationDocOuter,
@@ -39,6 +43,7 @@ import {
   uploadVehicleRegistrationDoc,
   type ContractListItem,
   type PickedFile,
+  type ServiceRecordDTO,
   type VehicleDTO,
   type VehicleStatsDTO,
   type VehicleStatsStatus,
@@ -165,6 +170,23 @@ export default function VehicleDetail() {
   const [closingContractId, setClosingContractId] = useState<string | null>(null);
   const [closeContractError, setCloseContractError] = useState<string | null>(null);
 
+  // Servisna knjižica - učitava se neovisno o aktivnom tabu (isti obrazac
+  // kao contracts), da ukupan trošak/broj zapisa bude spreman čim se tab
+  // otvori, bez dodatnog loading treptaja. Isti DD.MM.GGGG. tekstualni
+  // datum obrazac kao svugdje drugdje u ovom fajlu (nema native date
+  // pickera, vidi napomenu kod statistike niže).
+  const [serviceRecords, setServiceRecords] = useState<ServiceRecordDTO[]>([]);
+  const [serviceRecordsLoading, setServiceRecordsLoading] = useState(true);
+  const [serviceDateHr, setServiceDateHr] = useState("");
+  const [serviceDescription, setServiceDescription] = useState("");
+  const [serviceCost, setServiceCost] = useState("");
+  const [serviceProvider, setServiceProvider] = useState("");
+  const [serviceReceiptFile, setServiceReceiptFile] = useState<PickedFile | null>(null);
+  const [serviceMarkUnderService, setServiceMarkUnderService] = useState(false);
+  const [savingServiceRecord, setSavingServiceRecord] = useState(false);
+  const [serviceRecordError, setServiceRecordError] = useState<string | null>(null);
+  const [deletingServiceRecordId, setDeletingServiceRecordId] = useState<string | null>(null);
+
   // Statistika - default zadnjih 30 dana. `statsRangeDays` null znači
   // "prilagođen raspon" (custom tekstualna polja ispod, isti DD.MM.GGGG. +
   // parseHrDateToIso obrazac kao "Datum isteka registracije" polje gore u
@@ -226,6 +248,104 @@ export default function VehicleDetail() {
   }, [loadContracts]);
 
   const vehicleContracts = contracts.filter((c) => c.vehicleId === id);
+
+  const loadServiceRecords = useCallback(() => {
+    listServiceRecords(id)
+      .then(setServiceRecords)
+      .catch(() => setServiceRecords([]))
+      .finally(() => setServiceRecordsLoading(false));
+  }, [id]);
+
+  useEffect(() => {
+    loadServiceRecords();
+  }, [loadServiceRecords]);
+
+  const totalServiceCost = serviceRecords.reduce((sum, r) => sum + r.cost, 0);
+
+  async function handlePickServiceReceipt() {
+    const result = await DocumentPicker.getDocumentAsync({ type: ["image/*", "application/pdf"] });
+    if (result.canceled || !result.assets?.[0]) return;
+    const asset = result.assets[0];
+    setServiceReceiptFile({
+      uri: asset.uri,
+      name: asset.name,
+      mimeType: asset.mimeType ?? "application/octet-stream",
+    });
+  }
+
+  async function handleAddServiceRecord() {
+    setServiceRecordError(null);
+
+    const isoDate = parseHrDateToIso(serviceDateHr.trim());
+    const cost = Number(serviceCost);
+    if (!isoDate) {
+      setServiceRecordError("Datum mora biti u formatu DD.MM.GGGG.");
+      return;
+    }
+    if (!serviceDescription.trim() || !serviceCost || Number.isNaN(cost)) {
+      setServiceRecordError("Popuni datum, opis i trošak.");
+      return;
+    }
+
+    setSavingServiceRecord(true);
+    try {
+      const input = {
+        date: isoDate,
+        description: serviceDescription.trim(),
+        cost,
+        provider: serviceProvider.trim() || undefined,
+      };
+
+      if (serviceReceiptFile) {
+        await createServiceRecordWithReceipt(id, input, serviceReceiptFile);
+      } else {
+        await createServiceRecord(id, input);
+      }
+
+      // Checkbox je samo prečac za ne-obavezno vezan "na servisu" toggle
+      // (isti obrazac kao web) - odvojen PATCH poziv NAKON uspješnog
+      // kreiranja zapisa, ne dio service-record kreiranja, i samo ako
+      // vozilo već nije na servisu.
+      if (serviceMarkUnderService && vehicle && !vehicle.underService) {
+        await updateVehicle(id, { underService: true });
+      }
+
+      setServiceDateHr("");
+      setServiceDescription("");
+      setServiceCost("");
+      setServiceProvider("");
+      setServiceReceiptFile(null);
+      setServiceMarkUnderService(false);
+      loadServiceRecords();
+      load();
+    } catch (err) {
+      setServiceRecordError(err instanceof Error ? err.message : "Greška prilikom spremanja zapisa");
+    } finally {
+      setSavingServiceRecord(false);
+    }
+  }
+
+  function handleDeleteServiceRecord(record: ServiceRecordDTO) {
+    Alert.alert("Obrisati zapis?", "Ova radnja je nepovratna.", [
+      { text: "Odustani", style: "cancel" },
+      {
+        text: "Obriši",
+        style: "destructive",
+        onPress: async () => {
+          setServiceRecordError(null);
+          setDeletingServiceRecordId(record.id);
+          try {
+            await deleteServiceRecord(id, record.id);
+            loadServiceRecords();
+          } catch (err) {
+            setServiceRecordError(err instanceof Error ? err.message : "Greška prilikom brisanja zapisa");
+          } finally {
+            setDeletingServiceRecordId(null);
+          }
+        },
+      },
+    ]);
+  }
 
   useEffect(() => {
     if (activeTab !== "stats") return;
@@ -875,10 +995,97 @@ export default function VehicleDetail() {
 
       {activeTab === "service" && (
         <View style={styles.section}>
-          <Text style={styles.muted}>
-            Servisna knjižica - uskoro. Puna funkcionalnost servisne povijesti (unos servisa, datumi,
-            troškovi) dolazi u budućoj nadogradnji.
+          <Text style={styles.sectionTitle}>
+            Ukupan trošak servisa: {totalServiceCost.toFixed(2)} €
           </Text>
+
+          <Text style={[styles.sectionTitle, { marginTop: 12 }]}>Nova intervencija</Text>
+          <Field
+            label="Datum (DD.MM.GGGG.)"
+            value={serviceDateHr}
+            onChangeText={setServiceDateHr}
+            placeholder="24.08.2026."
+          />
+          <Field
+            label="Opis intervencije"
+            value={serviceDescription}
+            onChangeText={setServiceDescription}
+            placeholder="npr. Zamjena ulja i filtera"
+          />
+          <Field
+            label="Trošak (EUR)"
+            value={serviceCost}
+            onChangeText={setServiceCost}
+            keyboardType="number-pad"
+          />
+          <Field
+            label="Servis / dobavljač"
+            value={serviceProvider}
+            onChangeText={setServiceProvider}
+            placeholder="npr. Autoservis Horvat"
+          />
+
+          <Text style={styles.fieldLabel}>Račun / dokument (opcionalno)</Text>
+          {serviceReceiptFile && <Text style={styles.muted}>Odabrano: {serviceReceiptFile.name}</Text>}
+          <Pressable style={styles.buttonSecondary} onPress={handlePickServiceReceipt}>
+            <Text style={styles.buttonSecondaryText}>
+              {serviceReceiptFile ? "Promijeni fajl" : "Odaberi fajl"}
+            </Text>
+          </Pressable>
+
+          {vehicle && !vehicle.underService && (
+            <Pressable
+              style={[styles.chip, serviceMarkUnderService && styles.chipActive, { alignSelf: "flex-start" }]}
+              onPress={() => setServiceMarkUnderService((v) => !v)}
+            >
+              <Text style={serviceMarkUnderService ? styles.chipTextActive : styles.chipText}>
+                {serviceMarkUnderService ? "✓ " : ""}Vozilo je trenutno na servisu
+              </Text>
+            </Pressable>
+          )}
+
+          {serviceRecordError && <Text style={styles.error}>{serviceRecordError}</Text>}
+
+          <Pressable
+            style={[styles.button, savingServiceRecord && styles.buttonDisabled]}
+            onPress={handleAddServiceRecord}
+            disabled={savingServiceRecord}
+          >
+            <Text style={styles.buttonText}>{savingServiceRecord ? "Spremanje..." : "Dodaj zapis"}</Text>
+          </Pressable>
+
+          <Text style={[styles.sectionTitle, { marginTop: 16 }]}>Povijest intervencija</Text>
+          {serviceRecordsLoading ? (
+            <ActivityIndicator />
+          ) : serviceRecords.length === 0 ? (
+            <Text style={styles.muted}>Nema unesenih servisnih zapisa.</Text>
+          ) : (
+            <View style={{ gap: 8 }}>
+              {serviceRecords.map((r) => (
+                <View key={r.id} style={styles.contractCard}>
+                  <Text style={styles.contractCardTitle}>
+                    {formatDateHr(r.date)} · {r.cost.toFixed(2)} €
+                  </Text>
+                  <Text style={styles.muted}>{r.description}</Text>
+                  {r.provider && <Text style={styles.muted}>{r.provider}</Text>}
+                  {r.receiptUrl && (
+                    <Pressable onPress={() => Linking.openURL(r.receiptUrl!)}>
+                      <Text style={styles.link}>Pregledaj račun</Text>
+                    </Pressable>
+                  )}
+                  <Pressable
+                    style={[styles.buttonSecondary, deletingServiceRecordId === r.id && styles.buttonDisabled]}
+                    onPress={() => handleDeleteServiceRecord(r)}
+                    disabled={deletingServiceRecordId === r.id}
+                  >
+                    <Text style={styles.buttonSecondaryText}>
+                      {deletingServiceRecordId === r.id ? "Brisanje..." : "Obriši"}
+                    </Text>
+                  </Pressable>
+                </View>
+              ))}
+            </View>
+          )}
         </View>
       )}
 
