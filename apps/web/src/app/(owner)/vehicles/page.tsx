@@ -4,6 +4,19 @@ import { useEffect, useState } from "react";
 import type { VehicleDTO } from "@rent-a-car/api/server";
 import { formatDateHr } from "@rent-a-car/api";
 
+const CSV_HEADERS = ["marka", "model", "godina", "VIN", "registarska tablica", "istek registracije"];
+
+function downloadCsvTemplate() {
+  const csv = CSV_HEADERS.join(",") + "\n";
+  const blob = new Blob(["﻿" + csv], { type: "text/csv;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = "vozila-predlozak.csv";
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
 export default function VehiclesPage() {
   const [vehicles, setVehicles] = useState<VehicleDTO[]>([]);
   const [loading, setLoading] = useState(true);
@@ -42,9 +55,17 @@ export default function VehiclesPage() {
     <div>
       <div className="toolbar">
         <h1>Vozila</h1>
-        <a className="btn btn-primary" href="/vehicles/new">
-          + Novo vozilo
-        </a>
+        <div style={{ display: "flex", gap: "0.5rem" }}>
+          <button type="button" className="btn" onClick={downloadCsvTemplate}>
+            Preuzmi CSV predložak
+          </button>
+          <a className="btn" href="/vehicles/import">
+            Uvoz vozila (CSV)
+          </a>
+          <a className="btn btn-primary" href="/vehicles/new">
+            + Novo vozilo
+          </a>
+        </div>
       </div>
 
       <input
@@ -78,6 +99,11 @@ export default function VehiclesPage() {
                   <a href={`/vehicles/${v.id}`}>
                     {v.make} {v.model}
                   </a>
+                  {v.hasIncompleteData && (
+                    <span title={`Nedostaje: ${v.incompleteReasons.join(", ")}`} style={{ marginLeft: "0.4rem" }}>
+                      ⚠️
+                    </span>
+                  )}
                 </td>
                 <td>{v.year ?? "—"}</td>
                 <td>{v.licensePlate}</td>

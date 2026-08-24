@@ -1,5 +1,5 @@
 import { prisma } from "../db/client";
-import { sendRegistrationExpiryEmail } from "../lib/email";
+import { sendIncompleteVehicleDataEmail, sendRegistrationExpiryEmail } from "../lib/email";
 
 const MILESTONES = [
   { days: 7, field: "registrationReminder7SentAt" as const },
@@ -109,4 +109,46 @@ export async function runRegistrationExpiryCheck(): Promise<RegistrationCheckRes
   }
 
   return { checked, remindersSent, errors };
+}
+
+export interface IncompleteDataCheckResult {
+  checked: number;
+  notificationsSent: { vehicleId: string }[];
+  errors: { vehicleId: string; error: string }[];
+}
+
+/**
+ * Isti dedupe obrazac kao runRegistrationExpiryCheck (jedan sent-at
+ * timestamp, notifikacija ide najviše jednom po vozilu - čak i ako se
+ * incompleteReasons kasnije promijene). Samo owner (klijent ne treba znati
+ * da je data-entry nepotpun) - za razliku od registracijskih podsjetnika
+ * koji idu i aktivnom najmoprimcu.
+ */
+export async function runIncompleteVehicleDataCheck(): Promise<IncompleteDataCheckResult> {
+  const notificationsSent: IncompleteDataCheckResult["notificationsSent"] = [];
+  const errors: IncompleteDataCheckResult["errors"] = [];
+
+  const vehicles = await prisma.vehicle.findMany({
+    where: { hasIncompleteData: true, incompleteDataNotifiedAt: null },
+  });
+
+  for (const vehicle of vehicles) {
+    try {
+      await sendIncompleteVehicleDataEmail({
+        to: getOwnerEmail(),
+        recipientName: "Owner",
+        vehicleLabel: `${vehicle.make} ${vehicle.model} (${vehicle.licensePlate})`,
+        reasons: vehicle.incompleteReasons,
+      });
+      await prisma.vehicle.update({
+        where: { id: vehicle.id },
+        data: { incompleteDataNotifiedAt: new Date() },
+      });
+      notificationsSent.push({ vehicleId: vehicle.id });
+    } catch (err) {
+      errors.push({ vehicleId: vehicle.id, error: err instanceof Error ? err.message : String(err) });
+    }
+  }
+
+  return { checked: vehicles.length, notificationsSent, errors };
 }

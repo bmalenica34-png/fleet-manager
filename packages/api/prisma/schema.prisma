@@ -35,6 +35,19 @@ model Vehicle {
   registrationReminder3SentAt DateTime?
   registrationReminder0SentAt DateTime?
 
+  // Postavlja SAMO CSV bulk import (server/vehicles.ts#importVehiclesFromCsvRows)
+  // kad red ima prazno/neispravno polje ali se svejedno kreira - ručni unos
+  // (forma) uvijek ostavlja ovo na default false/[], jer HTML/Zod validacija
+  // ondje već sprječava nepotpun submit. incompleteReasons su gotovi
+  // hrvatski tekstovi za prikaz (ne field-key identifikatori) - jedino mjesto
+  // koje ih čita je UI badge/tooltip, nema druge programske logike nad njima.
+  hasIncompleteData Boolean  @default(false)
+  incompleteReasons String[] @default([])
+  // Dedupe za "nepotpuni podaci" notifikaciju (isti obrazac kao
+  // registrationReminder*SentAt) - šalje se najviše jednom po vozilu, čak i
+  // ako se reasons kasnije promijene.
+  incompleteDataNotifiedAt DateTime?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 

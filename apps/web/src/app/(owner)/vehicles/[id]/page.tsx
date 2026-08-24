@@ -507,6 +507,21 @@ export default function VehicleDetailPage() {
         {vehicle.make} {vehicle.model}
       </h1>
 
+      {vehicle.hasIncompleteData && (
+        <div
+          style={{
+            padding: "0.75rem 1rem",
+            marginBottom: "1rem",
+            border: "1px solid #d97706",
+            borderRadius: "6px",
+            background: "#fffbeb",
+            color: "#92400e",
+          }}
+        >
+          ⚠️ <strong>Nepotpuni podaci</strong> (vjerojatno uvezeno preko CSV-a): {vehicle.incompleteReasons.join(", ")}
+        </div>
+      )}
+
       {activeContract && (
         <div
           style={{

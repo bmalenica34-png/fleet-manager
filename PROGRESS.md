@@ -4,7 +4,130 @@ Dinamički log stanja projekta. Ažurira se na kraju svake sesije. Za statičnu
 arhitekturu/konvencije vidi [CLAUDE.md](CLAUDE.md) — ovaj dokument je "što je
 gotovo i zašto", ne "kako treba izgledati".
 
-**Zadnje ažurirano:** 2026-08-24, dvadesetdrugi nastavak - korisnik zatražio
+**Zadnje ažurirano:** 2026-08-24, dvadesettreći nastavak - korisnik zatražio
+bulk unos vozila putem CSV uploada. **Otkriven i riješen genuine konflikt u
+zahtjevu prije implementacije** - detaljna numerirana specifikacija (sekcija
+3) eksplicitno kaže "NIŠTA se ne preskače zbog nedostajućih/lošeg formata
+podataka... vozilo se svejedno kreira" s "prazan VIN, nedostaje godina,
+neparsabilan datum" kao izričitim primjerima koji NE smiju biti preskočeni,
+dok test-scenarij na kraju kaže "5 vozila... 3 reda preskočena" (podrazumijeva
+da SVA 3 pokvarena retka - uklj. nedostajuću godinu i loš datum, ne samo
+duplikat VIN-a - budu preskočena). Ovo se izravno kosi s numeriranom
+specifikacijom. **Odlučeno slijediti numeriranu specifikaciju kao mjerodavnu**
+(eksplicitnija, ima vlastiti odjeljak naslovljen "DODAJ, ALI OZNAČI
+NEPOTPUNO", i vlastiti izvještajni format u sekciji 3 razdvaja "uvezeno
+(nepotpunih)" od "preskočeno zbog duplikata" kao dva odvojena brojača) -
+test-scenarij tretiran kao vjerojatno neprecizna parafraza, ne kao izmjena
+pravila. Rezultat s korisnikovim točnim test podacima (5 ispravnih + 3
+pokvarena): **7 vozila uvezeno** (5 potpunih + 2 nepotpuna: nedostaje
+godina, loš format datuma), **1 red preskočen** (duplikat VIN-a) - NE "5
+vozila, 3 preskočena" kako bi test-scenarij doslovno sugerirao. Ovo je
+jasno naglašeno korisniku u sažetku sesije da može ispraviti ako je
+test-scenarij zapravo bio namjeravano ponašanje.
+
+**1) CSV predložak.** Zaglavlja točno prema postojećem Vehicle modelu -
+`marka,model,godina,VIN,registarska tablica,istek registracije` (format
+datuma DD.MM.GGGG., isti kao svugdje u appu - `formatDateHr`/
+`parseHrDateToIso`). Generira se ČISTO client-side (Blob download, UTF-8
+BOM zbog Excela) - nema potrebe za API rutom za statičan tekst. Gumb i na
+`/vehicles` (toolbar) i na novoj `/vehicles/import` stranici.
+
+**2) Upload i parsing.** Nema postojeće CSV ovisnosti u repou (provjereno
+prije dodavanja) - napisan lagan RFC4180-ish parser bez vanjske ovisnosti
+(`packages/api/src/server/csv.ts`, ~50 linija - format je jednostavan
+fiksni skup kolona, teška biblioteka poput papaparse nije opravdana).
+Auto-detektira delimiter (zarez/točka-zarez) po zaglavlju - hr-HR Excel
+lokal po defaultu sprema CSV sa točka-zarezom (zarez je decimalni
+separator), pa predložak (zarez) ostaje kompatibilan i ako ga korisnik
+otvori/spremi natrag kroz Excel.
+
+**3) Validacija po redu.** `importVehiclesFromCsvRows` (`server/vehicles.ts`)
+- svaki red se kreira NEOVISNO o nedostajućim/lošim poljima (marka/model
+padaju na "Nepoznato" placeholder, godina/VIN/datum ostaju prazni) OSIM
+kad nedostaje registarska tablica (shema zahtijeva NOT NULL+UNIQUE, nema
+smislenog placeholdera za identifikacijsku oznaku vozila - JEDINO
+odstupanje od "ništa se ne preskače" pravilo, ali korisnikovi VLASTITI
+primjeri ("prazan VIN, nedostaje godina, neparsabilan datum") nikad nisu
+spominjali praznu tablicu, pa ovo ne krši navedene primjere, samo
+popunjava rupu koju nisu adresirali). Nova `Vehicle.hasIncompleteData`
+(boolean) + `incompleteReasons` (String[], GOTOVI hrvatski tekstovi za
+prikaz, ne field-key identifikatori - jedino mjesto koje ih čita je UI). **
+Duplikati (VIN ili tablica) provjeravaju se DVOSTRUKO - protiv postojeće
+baze (`findFirst` s `mode: "insensitive"`, case-insensitive da "zg1234ab"
+ne proskliže kao "različit" od "ZG1234AB") I unutar istog CSV batcha
+(running `Set`, jer se redovi umeću sekvencijalno pa bi drugi duplikat
+unutar datoteke inače tiho prošao kao "nova" tablica prije nego prvi
+commit stigne u bazu za usporedbu)** - oba slučaja se PRESKAČU i prijavljuju
+kao greška retka (`skipped`), razdvojeno od `incompleteReasons` (koncept
+"pravi duplikat" != "nepotpun podatak").
+
+**Napomena o formatu izvještaja** - sekcija 3 eksplicitno traži "X vozila
+uvezeno (od toga Y nepotpunih), Z redova preskočeno zbog duplikata" -
+implementirano doslovno kao dva razdvojena brojača (`importedCount`
+uklj. nepotpune, `skippedCount` isključivo duplikati/prazna-tablica), NE
+kao jedan "problematični redovi" popis.
+
+**3b) Oznaka nepotpunog vozila.** ⚠️ badge s `title` tooltipom na `/vehicles`
+listi (uz marku/model) i banner (amber, isti stil kao ostala upozorenja
+ovaj sesije) na `/vehicles/[id]` vrhu stranice, oba čitaju
+`incompleteReasons` izravno. **Notifikacija replicira TOČAN obrazac
+registracijskih podsjetnika** (`registrationReminders.ts`, provjeren prije
+pisanja) - novi `Vehicle.incompleteDataNotifiedAt` dedupe timestamp (isti
+mehanizam kao `registrationReminderXSentAt` - šalje se najviše jednom,
+čak i ako se `incompleteReasons` kasnije promijene), nova
+`runIncompleteVehicleDataCheck()` funkcija u istom modulu, novi
+`sendIncompleteVehicleDataEmail` u `lib/email.ts`. **Razlika od
+registracijskih podsjetnika namjerno**: šalje se SAMO owneru (ne i
+aktivnom najmoprimcu - klijent nema razloga znati da je data-entry
+nepotpun, za razliku od isteka registracije koji njega izravno pogađa).
+**Nije dodan novi Vercel cron entry** (rizik probijanja plan limita broja
+cron poslova - `vercel.json` već ima 2, dodavanje trećeg bez provjere
+limita bi mogao ponoviti klasu deploy problema iz sedamnaestog nastavka) -
+umjesto toga postojeća `/api/cron/check-registrations` ruta sad pokreće
+OBA provjere (`Promise.all`) u istom dnevnom requestu.
+
+**4) Duplikati** - vidi sekciju 3 gore (implementirano zajedno, ista
+provjera pokriva oba zahtjeva).
+
+**5) OCR-enabled dokumenti** - CSV import namjerno NE dira
+`registrationDocKey`/`insurancePolicyKey` (ostaju `null`), dokumenti se i
+dalje dodaju ručno po vozilu nakon uvoza, kako je traženo.
+
+**UI.** Nova `/vehicles/import` stranica - predložak/upload/rezultat u
+jednom toku, izvještaj prikazuje summary rečenicu + tablicu "Nepotpuna
+vozila" (redak, link na vozilo, razlog) + tablicu "Preskočeni redovi"
+(redak, razlog) - obje tablice, ne spojeno u jednu, jer predstavljaju
+različite ishode (importirano-ali-nepotpuno vs. odbijeno).
+
+**Migracija** (ručno napisana, isti razlog kao prijašnjih sedam nastavaka) -
+3 nova stupca na `vehicles` (`hasIncompleteData` boolean default false,
+`incompleteReasons` TEXT[] default prazan niz, `incompleteDataNotifiedAt`
+nullable timestamp).
+
+**Verifikacija.** `tsc --noEmit` čist na sva tri paketa, `next build` čist
+(`/vehicles/import`, `/api/vehicles/import-csv` vidljivi). **Stvaran
+end-to-end test protiv produkcijske baze** (privremena debug ruta, isti
+obrazac kao prijašnjih sedam nastavaka) - TOČNO korisnikov test scenarij iz
+zahtjeva (CSV tekst, ne fabricirani objekti - testira i `parseCsv` i
+`importVehiclesFromCsvRows` zajedno, stvaran upload-do-DB put): 5 ispravnih
+redaka + duplikat VIN-a + nedostaje godina + loš format datuma (ISO umjesto
+DD.MM.GGGG.) → svih 8 provjera prošlo (`importedCount:7`,
+`incompleteCount:2`, `skippedCount:1`, točan redak/razlog za svaki od tri
+problematična retka, svih 5 čistih redaka potvrđeno potpuno). Test podaci
+(7 vozila) obrisani nakon verifikacije, ovaj put BEZ greške u čišćenju
+(cleanup ID-jevi spremljeni u fajl iz JEDNOG poziva prije brisanja - naučeno
+iz grešaka u prijašnja dva nastavka gdje je slučajan ponovni GET stvorio
+duplicirane test podatke). **Notifikacijski cron path (`
+runIncompleteVehicleDataCheck`) NIJE live-testiran** - namjerno, jer bi
+stvaran poziv poslao pravi email na produkcijski `OWNER_EMAIL` (isti razlog
+kao ranije u ovom logu za T&C/PDF testove); logika je doslovno preslikan
+obrazac već dokazanog `runRegistrationExpiryCheck`-a i prošla je typecheck,
+procijenjeno dovoljnim bez dodatnog live poziva. Debug ruta uklonjena
+nakon verifikacije (`git status` potvrđuje čist diff).
+
+---
+
+**Prijašnji dio (dvadesetdrugi nastavak)** - korisnik zatražio
 search barove za vozila/klijente, rental history + date-range filter po
 vozilu, istaknut aktivan ugovor, i provjeru kompletnosti klijentovih
 dokumenata (osobna+vozačka, obje strane).
