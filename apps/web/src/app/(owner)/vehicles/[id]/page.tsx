@@ -51,13 +51,14 @@ function StatusBadge({ status }: { status: VehicleDTO["status"] }) {
   );
 }
 
-type VehicleTab = "info" | "documents" | "images" | "service" | "contracts" | "stats";
+type VehicleTab = "info" | "documents" | "images" | "service" | "costs" | "contracts" | "stats";
 
 const TABS: { id: VehicleTab; label: string }[] = [
   { id: "info", label: "Podaci o vozilu" },
   { id: "documents", label: "Dokumenti" },
   { id: "images", label: "Slike vozila" },
   { id: "service", label: "Servisna knjižica" },
+  { id: "costs", label: "Dodatni troškovi" },
   { id: "contracts", label: "Ugovori" },
   { id: "stats", label: "Statistika" },
 ];
@@ -106,9 +107,35 @@ interface VehicleStatsDTO {
   freeDays: number;
   revenue: number;
   serviceCost: number;
+  additionalCosts: number;
   profit: number;
   utilization: number;
   status: "good" | "ok" | "bad" | "no_activity";
+}
+
+const VEHICLE_COST_TYPE_LABELS: Record<string, string> = {
+  leasing: "Leasing",
+  insurance: "Osiguranje",
+  kasko: "Kasko",
+  other: "Ostalo",
+};
+
+const INSTALLMENT_FREQUENCY_LABELS: Record<string, string> = {
+  monthly: "Mjesečno",
+  quarterly: "Kvartalno",
+  yearly: "Godišnje",
+};
+
+interface VehicleCostDTO {
+  id: string;
+  costType: string;
+  customType: string | null;
+  amount: number;
+  isInstallment: boolean;
+  installmentFrequency: string | null;
+  startDate: string | null;
+  endDate: string | null;
+  date: string | null;
 }
 
 export default function VehicleDetailPage() {
@@ -142,6 +169,23 @@ export default function VehicleDetailPage() {
   const [savingServiceRecord, setSavingServiceRecord] = useState(false);
   const [serviceRecordError, setServiceRecordError] = useState<string | null>(null);
   const [deletingServiceRecordId, setDeletingServiceRecordId] = useState<string | null>(null);
+
+  // Dodatni troškovi (leasing/osiguranje/kasko/ostalo) - izvan servisne
+  // knjižice, isti "učitava se odmah, neovisno o tabu" obrazac kao service
+  // records/contracts iznad.
+  const [vehicleCosts, setVehicleCosts] = useState<VehicleCostDTO[]>([]);
+  const [vehicleCostsLoading, setVehicleCostsLoading] = useState(true);
+  const [costType, setCostType] = useState("leasing");
+  const [costCustomType, setCostCustomType] = useState("");
+  const [costAmount, setCostAmount] = useState("");
+  const [costIsInstallment, setCostIsInstallment] = useState(false);
+  const [costInstallmentFrequency, setCostInstallmentFrequency] = useState("monthly");
+  const [costStartDate, setCostStartDate] = useState("");
+  const [costEndDate, setCostEndDate] = useState("");
+  const [costDate, setCostDate] = useState("");
+  const [savingCost, setSavingCost] = useState(false);
+  const [costError, setCostError] = useState<string | null>(null);
+  const [deletingCostId, setDeletingCostId] = useState<string | null>(null);
 
   // Statistika - default zadnjih 30 dana (uklj. danas), samo se učitava kad
   // je tab stvarno otvoren (za razliku od contracts/service gore) jer
@@ -237,6 +281,84 @@ export default function VehicleDetailPage() {
   }, [vehicleId]);
 
   const totalServiceCost = serviceRecords.reduce((sum, r) => sum + r.cost, 0);
+
+  function loadVehicleCosts() {
+    setVehicleCostsLoading(true);
+    fetch(`/api/vehicles/${vehicleId}/costs`)
+      .then((res) => res.json())
+      .then(setVehicleCosts)
+      .finally(() => setVehicleCostsLoading(false));
+  }
+
+  useEffect(() => {
+    loadVehicleCosts();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [vehicleId]);
+
+  async function handleAddVehicleCost(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setCostError(null);
+
+    if (!costAmount || Number(costAmount) <= 0) {
+      setCostError("Upiši valjan iznos.");
+      return;
+    }
+    if (costType === "other" && !costCustomType.trim()) {
+      setCostError("Upiši opis za 'Ostalo'.");
+      return;
+    }
+    if (costIsInstallment && !costStartDate) {
+      setCostError("Upiši datum početka rate.");
+      return;
+    }
+    if (!costIsInstallment && !costDate) {
+      setCostError("Upiši datum jednokratnog troška.");
+      return;
+    }
+
+    setSavingCost(true);
+
+    const payload = {
+      costType,
+      customType: costType === "other" ? costCustomType.trim() : undefined,
+      amount: Number(costAmount),
+      isInstallment: costIsInstallment,
+      installmentFrequency: costIsInstallment ? costInstallmentFrequency : undefined,
+      startDate: costIsInstallment ? costStartDate : undefined,
+      endDate: costIsInstallment && costEndDate ? costEndDate : undefined,
+      date: costIsInstallment ? undefined : costDate,
+    };
+
+    const res = await fetch(`/api/vehicles/${vehicleId}/costs`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+
+    setSavingCost(false);
+    if (!res.ok) {
+      setCostError("Greška prilikom spremanja troška.");
+      return;
+    }
+
+    setCostType("leasing");
+    setCostCustomType("");
+    setCostAmount("");
+    setCostIsInstallment(false);
+    setCostInstallmentFrequency("monthly");
+    setCostStartDate("");
+    setCostEndDate("");
+    setCostDate("");
+    loadVehicleCosts();
+  }
+
+  async function handleDeleteVehicleCost(id: string) {
+    if (!confirm("Obrisati ovaj trošak? Ova radnja je nepovratna.")) return;
+    setDeletingCostId(id);
+    await fetch(`/api/vehicles/${vehicleId}/costs/${id}`, { method: "DELETE" });
+    setDeletingCostId(null);
+    loadVehicleCosts();
+  }
 
   useEffect(() => {
     if (activeTab !== "stats") return;
@@ -1152,6 +1274,139 @@ export default function VehicleDetailPage() {
         </div>
       )}
 
+      {activeTab === "costs" && (
+        <div style={{ marginTop: "2rem" }}>
+          <h2>Nova stavka</h2>
+          <form onSubmit={handleAddVehicleCost}>
+            <label>
+              Tip troška
+              <select value={costType} onChange={(e) => setCostType(e.target.value)}>
+                {Object.entries(VEHICLE_COST_TYPE_LABELS).map(([value, label]) => (
+                  <option key={value} value={value}>
+                    {label}
+                  </option>
+                ))}
+              </select>
+            </label>
+            {costType === "other" && (
+              <label>
+                Opis
+                <input
+                  value={costCustomType}
+                  onChange={(e) => setCostCustomType(e.target.value)}
+                  placeholder="npr. Parkirna karta"
+                />
+              </label>
+            )}
+            <label>
+              Iznos (EUR)
+              <input
+                type="number"
+                min={0.01}
+                step="0.01"
+                value={costAmount}
+                onChange={(e) => setCostAmount(e.target.value)}
+              />
+            </label>
+            <label style={{ flexDirection: "row", alignItems: "center", gap: "0.5rem" }}>
+              <input
+                type="checkbox"
+                checked={costIsInstallment}
+                onChange={(e) => setCostIsInstallment(e.target.checked)}
+                style={{ width: "auto" }}
+              />
+              Ovo je rata (ponavljajući trošak)
+            </label>
+
+            {costIsInstallment ? (
+              <>
+                <label>
+                  Učestalost
+                  <select
+                    value={costInstallmentFrequency}
+                    onChange={(e) => setCostInstallmentFrequency(e.target.value)}
+                  >
+                    {Object.entries(INSTALLMENT_FREQUENCY_LABELS).map(([value, label]) => (
+                      <option key={value} value={value}>
+                        {label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label>
+                  Datum početka
+                  <input type="date" value={costStartDate} onChange={(e) => setCostStartDate(e.target.value)} />
+                </label>
+                <label>
+                  Datum kraja (prazno = do daljnjega)
+                  <input type="date" value={costEndDate} onChange={(e) => setCostEndDate(e.target.value)} />
+                </label>
+              </>
+            ) : (
+              <label>
+                Datum troška
+                <input type="date" value={costDate} onChange={(e) => setCostDate(e.target.value)} />
+              </label>
+            )}
+
+            {costError && <p className="error">{costError}</p>}
+
+            <button className="btn btn-primary" type="submit" disabled={savingCost}>
+              {savingCost ? "Spremanje..." : "Dodaj trošak"}
+            </button>
+          </form>
+
+          <h2 style={{ marginTop: "2rem" }}>Popis</h2>
+          {vehicleCostsLoading ? (
+            <p className="muted">Učitavanje...</p>
+          ) : vehicleCosts.length === 0 ? (
+            <p className="muted">Nema unesenih dodatnih troškova.</p>
+          ) : (
+            <table>
+              <thead>
+                <tr>
+                  <th>Tip</th>
+                  <th>Iznos</th>
+                  <th>Detalji</th>
+                  <th />
+                </tr>
+              </thead>
+              <tbody>
+                {vehicleCosts.map((c) => (
+                  <tr key={c.id}>
+                    <td>
+                      {VEHICLE_COST_TYPE_LABELS[c.costType] ?? c.costType}
+                      {c.customType && ` (${c.customType})`}
+                    </td>
+                    <td>
+                      {c.amount.toFixed(2)} €{c.isInstallment && " / " + INSTALLMENT_FREQUENCY_LABELS[c.installmentFrequency ?? ""]}
+                    </td>
+                    <td>
+                      {c.isInstallment ? (
+                        <>
+                          {formatDateHr(c.startDate!)} – {c.endDate ? formatDateHr(c.endDate) : "do daljnjega"}
+                        </>
+                      ) : (
+                        formatDateHr(c.date!)
+                      )}
+                    </td>
+                    <td>
+                      <button
+                        className="btn btn-danger"
+                        onClick={() => handleDeleteVehicleCost(c.id)}
+                        disabled={deletingCostId === c.id}
+                      >
+                        {deletingCostId === c.id ? "Brisanje..." : "Obriši"}
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+      )}
+
       {activeTab === "contracts" && (
         <div style={{ marginTop: "2rem" }}>
           <div style={{ display: "flex", gap: "1rem", alignItems: "flex-end", marginBottom: "1rem" }}>
@@ -1238,6 +1493,9 @@ export default function VehicleDetailPage() {
               Do
               <input type="date" value={statsTo} onChange={(e) => setStatsTo(e.target.value)} />
             </label>
+            <a className="btn" href={`/?vehicleId=${vehicleId}`}>
+              Vidi na dashboardu (s grafom)
+            </a>
           </div>
 
           {statsLoading || !stats ? (
@@ -1268,6 +1526,10 @@ export default function VehicleDetailPage() {
                   <tr>
                     <td>Trošak servisa</td>
                     <td>{stats.serviceCost.toFixed(2)} €</td>
+                  </tr>
+                  <tr>
+                    <td>Dodatni troškovi (leasing/osiguranje/ostalo)</td>
+                    <td>{stats.additionalCosts.toFixed(2)} €</td>
                   </tr>
                   <tr>
                     <td>

@@ -1,5 +1,5 @@
 import { prisma } from "../db/client";
-import type { CompanySettingsUpdateInput } from "../schemas/companySettings";
+import type { CompanySettingsUpdateInput, ReportFrequency } from "../schemas/companySettings";
 import { deleteObject, getPresignedDownloadUrl } from "../storage/hetzner";
 
 // Singleton red - jedina instanca CompanySettings, id je fiksan (vidi
@@ -15,6 +15,10 @@ export interface CompanySettingsDTO {
   phone: string | null;
   email: string | null;
   logoUrl: string | null;
+  reportFrequency: ReportFrequency;
+  reportCustomIntervalDays: number | null;
+  reportEmailEnabled: boolean;
+  lastReportSentAt: Date | null;
   updatedAt: Date;
 }
 
@@ -25,6 +29,10 @@ async function toDTO(settings: {
   phone: string | null;
   email: string | null;
   logoKey: string | null;
+  reportFrequency: ReportFrequency;
+  reportCustomIntervalDays: number | null;
+  reportEmailEnabled: boolean;
+  lastReportSentAt: Date | null;
   updatedAt: Date;
 }): Promise<CompanySettingsDTO> {
   return {
@@ -34,6 +42,10 @@ async function toDTO(settings: {
     phone: settings.phone,
     email: settings.email,
     logoUrl: settings.logoKey ? await getPresignedDownloadUrl(settings.logoKey) : null,
+    reportFrequency: settings.reportFrequency,
+    reportCustomIntervalDays: settings.reportCustomIntervalDays,
+    reportEmailEnabled: settings.reportEmailEnabled,
+    lastReportSentAt: settings.lastReportSentAt,
     updatedAt: settings.updatedAt,
   };
 }

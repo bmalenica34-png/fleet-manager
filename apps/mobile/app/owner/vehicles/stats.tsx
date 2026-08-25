@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useState } from "react";
-import { ActivityIndicator, FlatList, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
+import { ActivityIndicator, Alert, FlatList, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
 import { useFocusEffect, useRouter } from "expo-router";
+import * as Sharing from "expo-sharing";
 import { isoToHrDate, parseHrDateToIso } from "@rent-a-car/api";
 import {
+  downloadReportPdf,
   getFleetStats,
   listVehicles,
   type VehicleDTO,
@@ -49,6 +51,7 @@ export default function FleetStatsScreen() {
   const [to, setTo] = useState(() => todayIsoDate());
   const [fromHr, setFromHr] = useState("");
   const [toHr, setToHr] = useState("");
+  const [downloadingPdf, setDownloadingPdf] = useState(false);
 
   const loadVehicles = useCallback(() => {
     listVehicles()
@@ -89,6 +92,23 @@ export default function FleetStatsScreen() {
     setToHr(value);
     const parsed = parseHrDateToIso(value);
     if (parsed) setTo(parsed);
+  }
+
+  async function handleDownloadPdf() {
+    setDownloadingPdf(true);
+    try {
+      const file = await downloadReportPdf(from, to);
+      const available = await Sharing.isAvailableAsync();
+      if (available) {
+        await Sharing.shareAsync(file.uri, { mimeType: "application/pdf" });
+      } else {
+        Alert.alert("PDF preuzet", `Dijeljenje nije dostupno na ovom uređaju. Fajl je spremljen na: ${file.uri}`);
+      }
+    } catch (err) {
+      Alert.alert("Greška", err instanceof Error ? err.message : "Preuzimanje izvještaja nije uspjelo");
+    } finally {
+      setDownloadingPdf(false);
+    }
   }
 
   const vehicleById = new Map(vehicles.map((v) => [v.id, v]));
@@ -143,6 +163,16 @@ export default function FleetStatsScreen() {
         </View>
       )}
 
+      <Pressable
+        style={[styles.downloadButton, downloadingPdf && styles.buttonDisabled]}
+        onPress={handleDownloadPdf}
+        disabled={downloadingPdf}
+      >
+        <Text style={styles.downloadButtonText}>
+          {downloadingPdf ? "Preuzimanje..." : "Preuzmi PDF izvještaj"}
+        </Text>
+      </Pressable>
+
       {loading ? (
         <ActivityIndicator style={{ marginTop: 24 }} />
       ) : sortedStats.length === 0 ? (
@@ -171,8 +201,8 @@ export default function FleetStatsScreen() {
                   {item.rentedDays} / {item.totalDays} dana pod ugovorom
                 </Text>
                 <Text style={styles.rowMuted}>
-                  Prihod {item.revenue.toFixed(2)} € · Servis {item.serviceCost.toFixed(2)} € · Profit{" "}
-                  {item.profit.toFixed(2)} €
+                  Prihod {item.revenue.toFixed(2)} € · Servis {item.serviceCost.toFixed(2)} € · Dodatni{" "}
+                  {item.additionalCosts.toFixed(2)} € · Profit {item.profit.toFixed(2)} €
                 </Text>
               </Pressable>
             );
@@ -215,4 +245,13 @@ const styles = StyleSheet.create({
   rowMuted: { fontSize: 13, color: "#888" },
   badge: { borderRadius: 999, paddingVertical: 3, paddingHorizontal: 10 },
   badgeText: { fontSize: 12, fontWeight: "600" },
+  downloadButton: {
+    borderWidth: 1,
+    borderColor: "#111",
+    padding: 12,
+    borderRadius: 8,
+    alignItems: "center",
+  },
+  downloadButtonText: { color: "#111", fontWeight: "600" },
+  buttonDisabled: { opacity: 0.5 },
 });

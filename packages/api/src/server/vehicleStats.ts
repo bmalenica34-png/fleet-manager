@@ -1,4 +1,5 @@
 import { prisma } from "../db/client";
+import { calculateProRatedVehicleCosts } from "./vehicleCosts";
 
 function startOfDay(date: Date): Date {
   const d = new Date(date);
@@ -41,6 +42,7 @@ export interface VehicleStatsDTO {
   freeDays: number;
   revenue: number;
   serviceCost: number;
+  additionalCosts: number; // VehicleCost, pro-rata za razdoblje (vidi calculateProRatedVehicleCosts)
   profit: number;
   utilization: number; // 0..1
   status: VehicleStatsStatus;
@@ -73,7 +75,7 @@ export async function getVehicleStats(
   const from = startOfDay(rangeFrom);
   const to = endOfDay(rangeTo);
 
-  const [contracts, serviceRecords] = await Promise.all([
+  const [contracts, serviceRecords, vehicleCosts] = await Promise.all([
     prisma.contract.findMany({
       where: {
         vehicleId,
@@ -85,6 +87,10 @@ export async function getVehicleStats(
     prisma.serviceRecord.findMany({
       where: { vehicleId, date: { gte: from, lte: to } },
       select: { cost: true },
+    }),
+    prisma.vehicleCost.findMany({
+      where: { vehicleId },
+      select: { isInstallment: true, installmentFrequency: true, startDate: true, endDate: true, date: true, amount: true },
     }),
   ]);
 
@@ -106,19 +112,22 @@ export async function getVehicleStats(
   }
 
   const serviceCost = serviceRecords.reduce((sum, r) => sum + r.cost, 0);
+  const additionalCosts = calculateProRatedVehicleCosts(vehicleCosts, from, to);
   const totalDays = daysBetweenInclusive(from, to);
   const rentedDays = Math.min(rentedDaySet.size, totalDays);
   const freeDays = totalDays - rentedDays;
-  const profit = revenue - serviceCost;
+  const profit = revenue - serviceCost - additionalCosts;
   const utilization = totalDays > 0 ? rentedDays / totalDays : 0;
 
   // Prvi pokušaj pragova (korisnikov eksplicitan zahtjev - "može se kasnije
   // fino podesiti"): "no_activity" je dodatno 4. stanje uz zeleno/žuto/
   // crveno iz zahtjeva - vozilo bez ijednog iznajmljenog dana I bez ijednog
-  // servisnog troška u razdoblju nije ni "dobro" ni "loše", nego "nema
-  // podataka za prosudbu" (npr. tek dodano vozilo, ili zaboravljeno).
+  // troška (servis ILI dodatni) u razdoblju nije ni "dobro" ni "loše", nego
+  // "nema podataka za prosudbu" (npr. tek dodano vozilo, ili zaboravljeno).
+  // Vozilo s aktivnom ratom ali bez iznajmljivanja NIJE "no_activity" - i
+  // dalje aktivno troši novac, treba se vidjeti kao "bad" (negativan profit).
   let status: VehicleStatsStatus;
-  if (rentedDays === 0 && serviceCost === 0) {
+  if (rentedDays === 0 && serviceCost === 0 && additionalCosts === 0) {
     status = "no_activity";
   } else if (profit > 0 && utilization > 0.6) {
     status = "good";
@@ -137,6 +146,7 @@ export async function getVehicleStats(
     freeDays,
     revenue,
     serviceCost,
+    additionalCosts,
     profit,
     utilization,
     status,

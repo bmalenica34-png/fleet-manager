@@ -172,4 +172,27 @@ export const styles = StyleSheet.create({
     color: "#888888",
     textAlign: "center",
   },
+  table: {
+    marginTop: 4,
+  },
+  tableHeaderRow: {
+    flexDirection: "row",
+    borderBottom: "1px solid #1a1a1a",
+    paddingBottom: 4,
+    marginBottom: 4,
+  },
+  tableRow: {
+    flexDirection: "row",
+    borderBottom: "1px solid #eeeeee",
+    paddingVertical: 3,
+  },
+  tableCellHeader: {
+    fontSize: 8,
+    fontFamily: "PTSans",
+    fontWeight: "bold",
+    color: "#555555",
+  },
+  tableCell: {
+    fontSize: 8,
+  },
 });

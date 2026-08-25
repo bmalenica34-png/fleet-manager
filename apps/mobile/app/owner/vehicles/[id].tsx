@@ -28,12 +28,15 @@ import {
   closeContract,
   createServiceRecord,
   createServiceRecordWithReceipt,
+  createVehicleCost,
   deleteServiceRecord,
+  deleteVehicleCost,
   deleteVehicleImage,
   getVehicle,
   getVehicleStats,
   listContracts,
   listServiceRecords,
+  listVehicleCosts,
   ocrInsurancePolicy,
   ocrRegistrationDocInner,
   ocrRegistrationDocOuter,
@@ -42,8 +45,11 @@ import {
   uploadVehicleInsurancePolicy,
   uploadVehicleRegistrationDoc,
   type ContractListItem,
+  type InstallmentFrequency,
   type PickedFile,
   type ServiceRecordDTO,
+  type VehicleCostDTO,
+  type VehicleCostType,
   type VehicleDTO,
   type VehicleStatsDTO,
   type VehicleStatsStatus,
@@ -53,16 +59,30 @@ import {
 const CURRENT_YEAR = new Date().getFullYear();
 const YEAR_OPTIONS = Array.from({ length: CURRENT_YEAR + 1 - 1980 + 1 }, (_, i) => CURRENT_YEAR + 1 - i);
 
-type VehicleTab = "info" | "documents" | "images" | "service" | "contracts" | "stats";
+type VehicleTab = "info" | "documents" | "images" | "service" | "costs" | "contracts" | "stats";
 
 const TABS: { id: VehicleTab; label: string }[] = [
   { id: "info", label: "Podaci" },
   { id: "documents", label: "Dokumenti" },
   { id: "images", label: "Slike" },
   { id: "service", label: "Servis" },
+  { id: "costs", label: "Troškovi" },
   { id: "contracts", label: "Ugovori" },
   { id: "stats", label: "Statistika" },
 ];
+
+const VEHICLE_COST_TYPE_LABELS: Record<string, string> = {
+  leasing: "Leasing",
+  insurance: "Osiguranje",
+  kasko: "Kasko",
+  other: "Ostalo",
+};
+
+const INSTALLMENT_FREQUENCY_LABELS: Record<string, string> = {
+  monthly: "Mjesečno",
+  quarterly: "Kvartalno",
+  yearly: "Godišnje",
+};
 
 const STATS_STATUS_BADGE: Record<VehicleStatsStatus, { label: string; bg: string; fg: string }> = {
   good: { label: "Dobro", bg: "#f0fdf4", fg: "#166534" },
@@ -187,6 +207,22 @@ export default function VehicleDetail() {
   const [serviceRecordError, setServiceRecordError] = useState<string | null>(null);
   const [deletingServiceRecordId, setDeletingServiceRecordId] = useState<string | null>(null);
 
+  // Dodatni troškovi (leasing/osiguranje/kasko/ostalo) - izvan servisne
+  // knjižice, isti "chip" toggle/tekstualni-datum obrazac kao ostatak fajla.
+  const [vehicleCosts, setVehicleCosts] = useState<VehicleCostDTO[]>([]);
+  const [vehicleCostsLoading, setVehicleCostsLoading] = useState(true);
+  const [costType, setCostType] = useState("leasing");
+  const [costCustomType, setCostCustomType] = useState("");
+  const [costAmount, setCostAmount] = useState("");
+  const [costIsInstallment, setCostIsInstallment] = useState(false);
+  const [costInstallmentFrequency, setCostInstallmentFrequency] = useState("monthly");
+  const [costStartDateHr, setCostStartDateHr] = useState("");
+  const [costEndDateHr, setCostEndDateHr] = useState("");
+  const [costDateHr, setCostDateHr] = useState("");
+  const [savingCost, setSavingCost] = useState(false);
+  const [costError, setCostError] = useState<string | null>(null);
+  const [deletingCostId, setDeletingCostId] = useState<string | null>(null);
+
   // Statistika - default zadnjih 30 dana. `statsRangeDays` null znači
   // "prilagođen raspon" (custom tekstualna polja ispod, isti DD.MM.GGGG. +
   // parseHrDateToIso obrazac kao "Datum isteka registracije" polje gore u
@@ -261,6 +297,104 @@ export default function VehicleDetail() {
   }, [loadServiceRecords]);
 
   const totalServiceCost = serviceRecords.reduce((sum, r) => sum + r.cost, 0);
+
+  const loadVehicleCosts = useCallback(() => {
+    listVehicleCosts(id)
+      .then(setVehicleCosts)
+      .catch(() => setVehicleCosts([]))
+      .finally(() => setVehicleCostsLoading(false));
+  }, [id]);
+
+  useEffect(() => {
+    loadVehicleCosts();
+  }, [loadVehicleCosts]);
+
+  async function handleAddVehicleCost() {
+    setCostError(null);
+
+    if (!costAmount || Number(costAmount) <= 0) {
+      setCostError("Upiši valjan iznos.");
+      return;
+    }
+    if (costType === "other" && !costCustomType.trim()) {
+      setCostError("Upiši opis za 'Ostalo'.");
+      return;
+    }
+
+    let startDate: string | undefined;
+    let endDate: string | undefined;
+    let date: string | undefined;
+
+    if (costIsInstallment) {
+      const parsedStart = parseHrDateToIso(costStartDateHr.trim());
+      if (!parsedStart) {
+        setCostError("Datum početka mora biti u formatu DD.MM.GGGG.");
+        return;
+      }
+      startDate = parsedStart;
+      if (costEndDateHr.trim()) {
+        const parsedEnd = parseHrDateToIso(costEndDateHr.trim());
+        if (!parsedEnd) {
+          setCostError("Datum kraja mora biti u formatu DD.MM.GGGG. (ili prazno = do daljnjega).");
+          return;
+        }
+        endDate = parsedEnd;
+      }
+    } else {
+      const parsedDate = parseHrDateToIso(costDateHr.trim());
+      if (!parsedDate) {
+        setCostError("Datum troška mora biti u formatu DD.MM.GGGG.");
+        return;
+      }
+      date = parsedDate;
+    }
+
+    setSavingCost(true);
+    try {
+      await createVehicleCost(id, {
+        costType: costType as VehicleCostType,
+        customType: costType === "other" ? costCustomType.trim() : undefined,
+        amount: Number(costAmount),
+        isInstallment: costIsInstallment,
+        installmentFrequency: costIsInstallment ? (costInstallmentFrequency as InstallmentFrequency) : undefined,
+        startDate,
+        endDate,
+        date,
+      });
+      setCostType("leasing");
+      setCostCustomType("");
+      setCostAmount("");
+      setCostIsInstallment(false);
+      setCostInstallmentFrequency("monthly");
+      setCostStartDateHr("");
+      setCostEndDateHr("");
+      setCostDateHr("");
+      loadVehicleCosts();
+    } catch (err) {
+      setCostError(err instanceof Error ? err.message : "Greška prilikom spremanja troška");
+    } finally {
+      setSavingCost(false);
+    }
+  }
+
+  function handleDeleteVehicleCost(cost: VehicleCostDTO) {
+    Alert.alert("Obrisati trošak?", "Ova radnja je nepovratna.", [
+      { text: "Odustani", style: "cancel" },
+      {
+        text: "Obriši",
+        style: "destructive",
+        onPress: async () => {
+          setDeletingCostId(cost.id);
+          try {
+            await deleteVehicleCost(id, cost.id);
+            loadVehicleCosts();
+          } finally {
+            setDeletingCostId(null);
+          }
+        },
+      },
+    ]);
+  }
 
   async function handlePickServiceReceipt() {
     const result = await DocumentPicker.getDocumentAsync({ type: ["image/*", "application/pdf"] });
@@ -1089,6 +1223,121 @@ export default function VehicleDetail() {
         </View>
       )}
 
+      {activeTab === "costs" && (
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Nova stavka</Text>
+
+          <Text style={styles.fieldLabel}>Tip troška</Text>
+          <View style={styles.chipWrap}>
+            {Object.entries(VEHICLE_COST_TYPE_LABELS).map(([value, label]) => (
+              <Pressable
+                key={value}
+                style={[styles.chip, costType === value && styles.chipActive]}
+                onPress={() => setCostType(value)}
+              >
+                <Text style={costType === value ? styles.chipTextActive : styles.chipText}>{label}</Text>
+              </Pressable>
+            ))}
+          </View>
+          {costType === "other" && (
+            <Field label="Opis" value={costCustomType} onChangeText={setCostCustomType} placeholder="npr. Parkirna karta" />
+          )}
+
+          <Field
+            label="Iznos (EUR)"
+            value={costAmount}
+            onChangeText={setCostAmount}
+            keyboardType="number-pad"
+          />
+
+          <Pressable
+            style={[styles.chip, costIsInstallment && styles.chipActive, { alignSelf: "flex-start" }]}
+            onPress={() => setCostIsInstallment((v) => !v)}
+          >
+            <Text style={costIsInstallment ? styles.chipTextActive : styles.chipText}>
+              {costIsInstallment ? "✓ " : ""}Ovo je rata (ponavljajući trošak)
+            </Text>
+          </Pressable>
+
+          {costIsInstallment ? (
+            <>
+              <Text style={styles.fieldLabel}>Učestalost</Text>
+              <View style={styles.chipWrap}>
+                {Object.entries(INSTALLMENT_FREQUENCY_LABELS).map(([value, label]) => (
+                  <Pressable
+                    key={value}
+                    style={[styles.chip, costInstallmentFrequency === value && styles.chipActive]}
+                    onPress={() => setCostInstallmentFrequency(value)}
+                  >
+                    <Text style={costInstallmentFrequency === value ? styles.chipTextActive : styles.chipText}>
+                      {label}
+                    </Text>
+                  </Pressable>
+                ))}
+              </View>
+              <Field
+                label="Datum početka (DD.MM.GGGG.)"
+                value={costStartDateHr}
+                onChangeText={setCostStartDateHr}
+                placeholder="24.08.2026."
+              />
+              <Field
+                label="Datum kraja (prazno = do daljnjega)"
+                value={costEndDateHr}
+                onChangeText={setCostEndDateHr}
+                placeholder="DD.MM.GGGG."
+              />
+            </>
+          ) : (
+            <Field
+              label="Datum troška (DD.MM.GGGG.)"
+              value={costDateHr}
+              onChangeText={setCostDateHr}
+              placeholder="24.08.2026."
+            />
+          )}
+
+          {costError && <Text style={styles.error}>{costError}</Text>}
+
+          <Pressable style={[styles.button, savingCost && styles.buttonDisabled]} onPress={handleAddVehicleCost} disabled={savingCost}>
+            <Text style={styles.buttonText}>{savingCost ? "Spremanje..." : "Dodaj trošak"}</Text>
+          </Pressable>
+
+          <Text style={[styles.sectionTitle, { marginTop: 16 }]}>Popis</Text>
+          {vehicleCostsLoading ? (
+            <ActivityIndicator />
+          ) : vehicleCosts.length === 0 ? (
+            <Text style={styles.muted}>Nema unesenih dodatnih troškova.</Text>
+          ) : (
+            <View style={{ gap: 8 }}>
+              {vehicleCosts.map((c) => (
+                <View key={c.id} style={styles.contractCard}>
+                  <Text style={styles.contractCardTitle}>
+                    {VEHICLE_COST_TYPE_LABELS[c.costType] ?? c.costType}
+                    {c.customType && ` (${c.customType})`} · {c.amount.toFixed(2)} €
+                    {c.isInstallment && ` / ${INSTALLMENT_FREQUENCY_LABELS[c.installmentFrequency ?? ""]}`}
+                  </Text>
+                  <Text style={styles.muted}>
+                    {c.isInstallment
+                      ? `${formatDateHr(c.startDate!)} – ${c.endDate ? formatDateHr(c.endDate) : "do daljnjega"}`
+                      : formatDateHr(c.date!)}
+                  </Text>
+                  <Pressable
+                    style={[styles.buttonSecondary, deletingCostId === c.id && styles.buttonDisabled]}
+                    onPress={() => handleDeleteVehicleCost(c)}
+                    disabled={deletingCostId === c.id}
+                  >
+                    <Text style={styles.buttonSecondaryText}>
+                      {deletingCostId === c.id ? "Brisanje..." : "Obriši"}
+                    </Text>
+                  </Pressable>
+                </View>
+              ))}
+            </View>
+          )}
+        </View>
+      )}
+
       {activeTab === "contracts" && (
         <View style={styles.section}>
           {closeContractError && <Text style={styles.error}>{closeContractError}</Text>}
@@ -1181,6 +1430,7 @@ export default function VehicleDetail() {
               <StatRow label="Dana slobodno" value={String(stats.freeDays)} />
               <StatRow label="Prihod" value={`${stats.revenue.toFixed(2)} €`} />
               <StatRow label="Trošak servisa" value={`${stats.serviceCost.toFixed(2)} €`} />
+              <StatRow label="Dodatni troškovi" value={`${stats.additionalCosts.toFixed(2)} €`} />
               <StatRow label="Profit" value={`${stats.profit.toFixed(2)} €`} bold />
             </View>
           )}

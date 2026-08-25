@@ -4,7 +4,310 @@ Dinamički log stanja projekta. Ažurira se na kraju svake sesije. Za statičnu
 arhitekturu/konvencije vidi [CLAUDE.md](CLAUDE.md) — ovaj dokument je "što je
 gotovo i zašto", ne "kako treba izgledati".
 
-**Zadnje ažurirano:** 2026-08-24, dvadesetdeveti nastavak - korisnik zatražio
+**Zadnje ažurirano:** 2026-08-25, tridesetprvi nastavak - korisnik zatražio
+proširenje statistike vozila: dodatni troškovi (leasing/osiguranje/kasko/
+ostalo, uklj. pro-rata rate), dashboard na početnoj stranici (web + mobile)
+sa selektorom "sva vozila / jedno vozilo" i grafom kroz vrijeme. **Nadovezuje
+se na, ne zamjenjuje, statistiku iz prošla dva nastavka** - `getVehicleStats`/
+`getFleetStats` prošireni novim poljem, ne prepisani.
+
+**Usput otkriven i istražen (NE popravljen kao "bug" - vidi zaključak)
+lažni pozitivan nalaz tijekom verifikacije**: prvi prolaz debug-testa
+pro-rata izračuna za ožujak 2026 nije se poklopio s ručno izračunatom
+vrijednosti (za točno 1 dan/10 EUR). Istraženo prije zaključka da je kod
+pogrešan - uzrok je **lokalna vremenska zona ovog Windows stroja
+(Europe/Zagreb, DST prijelaz 29.03.2026. unutar test-raspona)** u
+kombinaciji s `setHours(0,0,0,0)`-baziranom "dan" aritmetikom koja je
+pretpostavljena svugdje u ovom repou (cron.ts, registrationReminders.ts,
+sad i vehicleStats.ts/vehicleCosts.ts/statsTimeSeries.ts) - fiksna
+86400000ms/dan konstanta se pomakne za ±1h preko DST granice. **Provjereno
+da ovo NIJE produkcijski bug**: Vercel Node.js serverless funkcije rade s
+`TZ=UTC` defaultom (nema custom TZ env vara ni lokalno ni u `vercel env ls
+production`), UTC nema DST, pa je cijeli lanac (parsing `?from=` datuma +
+`setHours` dan-aritmetika) samo-dosljedan u produkciji. **Potvrđeno
+eksperimentalno, ne samo teorijom** - privremeno dodan `TZ=UTC` u lokalni
+`apps/web/.env` (mičući lokalnu vremensku zonu iz jednadžbe, replicirajući
+točno produkcijsko okruženje), isti test ponovljen → sve prošlo. `TZ=UTC`
+red uklonjen nakon verifikacije (`git status` potvrđuje `.env` bez diffa -
+taj fajl nije ni pod git kontrolom, ali provjereno da je vraćen na
+izvorno stanje). **Spremljeno u trajnu memoriju**
+(`project_dev_server_gotchas`) - buduće lokalno testiranje date-range
+logike koja premošćuje DST granice (kraj ožujka/listopada) treba ili
+birati raspone koji je izbjegavaju, ili privremeno postaviti `TZ=UTC`
+prije testiranja, da se izbjegnu ovakvi lažni nalazi.
+
+**1) Shema - `VehicleCost` model.** `costType` (novi enum
+leasing/insurance/kasko/other - diskretne kategorije, za razliku od
+`ServiceRecord.provider` koji je namjerno slobodan tekst; `other` nosi
+`customType` za detalj). `amount` = iznos PO UČESTALOSTI za rate (npr.
+mjesečna rata), ne ukupan iznos ugovora. `isInstallment` + (`installmentFrequency`
+enum monthly/quarterly/yearly + `startDate` + opcionalan `endDate`, null =
+"do daljnjega") ZA rate, ILI samo `date` za jednokratan trošak - app-level
+invarijanta (ne DB constraint, isti "trust internal code" obrazac kao
+svugdje u ovoj shemi).
+
+**2) Pro-rata izračun (`server/vehicleCosts.ts` -
+`calculateProRatedVehicleCosts`).** Jednokratan trošak - uključen SAMO ako
+`date` upada u razdoblje (isti pristup kao `ServiceRecord.cost`). Rata -
+`amount × (dana preklapanja / dana u jednom obračunskom razdoblju)` -
+približne duljine (monthly=30/quarterly=91/yearly=365 dana, ista
+pojednostavljena pretpostavka kao "monthly=30" u `periodicReports.ts` od
+prošlog nastavka). `endDate` null ("do daljnjega") tretira se kao da rata
+traje BAREM do kraja upitnog razdoblja. `getVehicleStats` (vehicleStats.ts)
+prošireno - dohvaća `VehicleCost` retke, poziva ovu funkciju, `profit` sad
+= `revenue - serviceCost - additionalCosts`. **Status pragovi ažurirani** -
+"no_activity" sad zahtijeva NULA i servisnog I dodatnog troška (vozilo s
+aktivnom ratom ali bez iznajmljivanja više NIJE "no_activity", nego "bad" -
+i dalje aktivno troši novac).
+
+**3) CRUD UI - novi "Dodatni troškovi" tab** na `/vehicles/[id]` (web) i
+`owner/vehicles/[id].tsx` (mobile), uz postojeći "Servisna knjižica" tab
+(korisnikov eksplicitan zahtjev "uz"). Forma s chip/select prekidačem
+jednokratno-vs-rata koji otkriva odgovarajuća polja. Mobile koristi isti
+DD.MM.GGGG. tekstualni datum obrazac kao ostatak fajla (nema native date
+pickera nigdje u appu, dosljedno).
+
+**4) Dashboard na početnoj stranici (web `(owner)/page.tsx`, mobile
+`owner/home.tsx`).** Zamjenjuje prijašnji statični placeholder (web) /
+plain nav-meni (mobile). Selektor "Sva vozila" (default) ili konkretno
+vozilo - kad "sva vozila", poziva `getFleetStats` + prikazuje tablicu po
+vozilu (sortirano po profitu, ISTA tablica koja je prije bila na
+`/vehicles/stats`); kad jedno vozilo, poziva `getVehicleStats` za taj ID.
+`/vehicles/stats` (stara ruta) sad SAMO redirecta na `/` (server-side
+`redirect()`) - čuva stare linkove (uklj. link iz periodičnog email
+izvještaja) bez dupliciranja UI-a. Web čita `?vehicleId=` iz
+`window.location` (NE `next/navigation`-ov `useSearchParams()` - taj hook
+zahtijeva Suspense boundary u Next 14 App Routeru, izbjegnuto direktnim
+`window.location.search` čitanjem u `useEffect` jer je stranica već cijela
+"use client") - vehicle-detail "Statistika" tab dobio gumb "Vidi na
+dashboardu (s grafom)" koji linka na `/?vehicleId=X`.
+
+**5) Graf kroz vrijeme - NOVA `server/statsTimeSeries.ts`
+(`getStatsTimeSeries`).** Dijeli razdoblje na kalendarske mjesečne "kante"
+(prva/zadnja odsječena na stvaran raspon), za svaku poziva
+`getVehicleStats`/`getFleetStats` (ovisno je li vozilo odabrano) - isti
+brojevi, samo raspoređeni po mjesecu. Nova `GET /api/stats/timeseries?
+vehicleId=&from=&to=` ruta (`vehicleId` izostavljen = sva vozila).
+
+**Graf - NAMJERNO bez chart biblioteke, na OBA platforme.** Provjereno
+prije pisanja koda: ni `apps/web/package.json` ni `apps/mobile/package.json`
+nemaju nijednu chart/graf biblioteku. Zahtjev je eksplicitno tražio pitanje
+prije dodavanja nove mobile ovisnosti - **izbjegnuto u potpunosti** ručno
+napisanim chartom umjesto pitanja: web koristi izvorni SVG (React ga
+podržava bez ikakve biblioteke, `(owner)/StatsChart.tsx`), mobile koristi
+plain `View` elemente s proporcionalnom visinom (`src/components/
+StatsChart.tsx`, prvi shared component u mobile appu - `apps/mobile/src/
+components/`, NE `app/owner/` direktorij, jer bi expo-router svaki fajl u
+`app/` tretirao kao rutu). Mobile verzija je namjerno pojednostavljena
+naspram web-a (nema "zero-line" podjele profit-iznad/trošak-ispod, obje
+trake rastu od iste linije, predznak profita nosi samo boja) - manje
+ekranskog prostora na mobitelu.
+
+**6) Periodični izvještaj (email/PDF) prošli nastavak prošireni novim
+poljem** - `additionalCosts` dodano u `PeriodicReportEmailVehicleRow`/
+`ReportPdfVehicleRow` tipove, HTML tablicu, PDF tablicu i `totals` zbroj
+(`periodicReports.ts`). `dashboardUrl` u periodičnom mailu promijenjen s
+`/vehicles/stats` na `/` (novi kanonski dashboard).
+
+**Verifikacija.** `tsc --noEmit` čist na sva tri paketa, `next build` čist
+(nove rute `/api/vehicles/[id]/costs`, `/api/vehicles/[id]/costs/[costId]`,
+`/api/stats/timeseries` vidljive, `/` narastao s placeholdera na 2.39 kB,
+`/vehicles/stats` smanjen na 158 B redirect stub). Migracija primijenjena
+`prisma migrate deploy` izravno na produkciju (uz korisnikovu potvrdu).
+**Stvaran end-to-end test protiv produkcijske baze** (privremena debug
+ruta bez auth-a, `TZ=UTC` forsiran za vrijeme testa - vidi gore) - SVE
+provjere prošle nakon TZ popravka: pro-rata rata za pun mjesec/pola
+mjeseca/mjesec-bez-jednokratnog-troška/prije-početka-rate sve točne,
+`endDate` cutoff točan, kvartalna rata pro-rata točna, profit ispravno
+oduzima dodatne troškove, **fleet agregacija** (`getFleetStats` zbroj =
+zbroj pojedinačnih `getVehicleStats` poziva) točna, **graf konzistentnost**
+(zbroj mjesečnih kanti = jedan poziv preko cijelog raspona) točna i za
+pojedino vozilo i za "sva vozila" (korisnikov eksplicitan test zahtjev
+"provjeri da graf i brojevi ostaju konzistentni"). **Usput uhvaćena i
+popravljena vlastita greška u SAMOM TESTU** (ne u produkcijskom kodu) -
+prva verzija `d2_fleetChartConsistency` provjere je uspoređivala 3-mjesečni
+graf zbroj s 1-mjesečnim (ožujak) fleet zbrojem, lažno pao; popravljeno da
+oba računaju preko istog Q1 raspona. Test podaci (2 vozila, 3 troška)
+obrisani u `finally` bloku, eksplicitno potvrđeno upitom nad produkcijskom
+bazom (oba brojača `0`). Debug ruta uklonjena (`git status` potvrđuje čist
+diff). **"Mobile prikazuje identične brojeve kao web" nije zasebno
+testirano na uređaju** (nema simulator/uređaj u ovom okruženju) - ali
+strukturno zajamčeno konstrukcijom: mobile poziva ISTE `/api/vehicles/[id]/
+stats`, `/api/vehicles/stats`, `/api/stats/timeseries` rute kao web, isti
+DTO oblik, ista (upravo testirana) backend logika - nema odvojene mobile
+implementacije brojki koja bi mogla divergirati.
+
+---
+
+**Prijašnji dio (trideseti nastavak)** - korisnik zatražio
+periodične izvještaje o profitabilnosti flote (automatski mail + on-demand
+PDF), nadovezano na dashboard iz prethodna dva nastavka. Web dio odrađen
+prvo, zatim mobile parity nakon korisnikove eksplicitne potvrde (pitan zbog
+većeg prethodnog gapa - vidi točku 7 niže). **Usput, između web i mobile
+dijela ove sesije, stigla je poruka koja je izgledala kao velik novi zahtjev
+("Proširi/zamijeni statistiku vozila...") koju je korisnik odmah zatim
+eksplicitno demantirao ("nisam ti ovaj prompt naljepio") - tretirano kao
+NE-instrukcija dok korisnik nije naknadno potvrdio da je ipak želi
+primijenjenu, TEK nakon dovršetka ovog nastavka** (vidi sljedeći nastavak).
+
+**1) Shema.** `CompanySettings` (singleton) dobio `reportFrequency`
+(novi enum `off|daily|weekly|monthly|custom`, default `off` - postojeći
+produkcijski račun ne počinje neočekivano primati automatske mailove dok
+vlasnik sam ne uključi u `/settings`), `reportCustomIntervalDays` (nullable
+Int, koristi se samo za "custom"), `reportEmailEnabled` (default `true` -
+korisnikov eksplicitan default), `lastReportSentAt` (dedupe timestamp, isti
+obrazac kao `registrationReminder*SentAt`). **"Svaki owner account ima svoj
+interval" iz zahtjeva NIJE implementirano doslovno** - app je single-tenant
+(JEDAN CompanySettings red, dokumentirano od prije), pa to kolabira na "taj
+jedan red ima svoj interval", bez iteracije po ownerima - točno kako i
+zahtjev sam kaže u točki 1 ("spremi u Settings/CompanySettings model").
+Interval se tretira kao "dana od zadnjeg slanja" (`daily=1/weekly=7/
+monthly=30/custom=N`), NE kalendarski dan/tjedan/mjesec - jednostavnije i
+dosljedno s "custom N dana" opcijom.
+
+**2) `server/periodicReports.ts` (novo).** `getReportIntervalDays`/
+`isReportDue` - čisti izračun bez efekata, lako testiran izravno (vidi
+verifikacija niže). `buildFleetReportData(from,to)` - **ISTI brojevi kao
+dashboard** (`getFleetStats` iz prošlog nastavka, nedirano), samo spojeno s
+vehicle labelama + fleet-wide zbrojevima; koristi ga i automatski mail i
+on-demand PDF (jedan izvor podataka, dva izlaza). `runPeriodicReportCheck()`
+- cron entry point: `off` → ništa; `custom` bez postavljenog broja dana →
+ništa (nepotpuna konfiguracija); `reportEmailEnabled: false` → ništa BEZ
+diranja `lastReportSentAt` (nema drugog automatiziranog artefakta osim
+maila - in-app dostupnost već postoji kroz `/vehicles/stats` bilo kad -
+kad vlasnik kasnije uključi mail, dužni izvještaj odmah krene sljedećim
+cron pokretanjem); inače provjeri `isReportDue`, ako da - pošalje mail i
+ažurira `lastReportSentAt`.
+
+**3) "Dana na servisu" u izvještaju - NIJE implementirano kao poseban
+brojač, namjerna odluka.** Zahtjev traži "dani iznajmljeno/slobodno/na
+servisu", ali `Vehicle.underService` je čist CURRENT boolean toggle bez
+povijesti (nikad nije bilježio KADA je uključen/isključen - vidi
+schema.prisma) - retroaktivno "koliko dana je vozilo bilo na servisu U
+PROŠLOM razdoblju" NIJE izračunljivo iz postojećih podataka, samo trenutno
+stanje. Kako "isti brojevi kao dashboard" iz zahtjeva izravno upućuje na
+`getFleetStats` (koji već postoji i NE prati taj povijesni brojač ni na
+dashboardu), izvještaj namjerno prikazuje isto što dashboard već prikazuje:
+`rentedDays`/`freeDays`/`totalDays` (mjerljivo, povijesno točno) + `status`
+(good/ok/bad/no_activity, ISTI dashboard indikator, uklj. trenutno
+`on_service` stanje kroz postojeći computed Vehicle.status). Dodavanje
+prave povijesne "servis-period" evidencije bio bi novi, veći data-model
+zahvat (zasebna vremenska evidencija odvojena od `ServiceRecord`, koji
+bilježi POJEDINAČNE troškove/intervencije, ne raspone nedostupnosti) -
+izvan opsega ovog zahtjeva, spomenuto korisniku u sažetku sesije.
+
+**4) Email (`lib/email.ts` - `sendPeriodicReportEmail`).** NAMJERNO bez
+grafa/slike - repo nema chart/image-generation biblioteku, a inline
+grafovi u emailu su notorno nepouzdani kroz email klijente - HTML tablica
+(brojevi po vozilu, sortirano po profitu) + link na
+`{NEXT_PUBLIC_OWNER_APP_URL}/vehicles/stats` za vizualni dashboard prikaz -
+točno fallback koji je zahtjev eksplicitno dopustio ("inače samo brojevi +
+link"). `NEXT_PUBLIC_OWNER_APP_URL` je već postojeći, DEFINIRAN ALI DOSAD
+NEKORIŠTEN env var u produkciji (provjeren `vercel env ls production` prije
+korištenja, ne nagađanjem) - prvi put stvarno iskorišten ovaj nastavak.
+
+**5) Cron.** Dodano u ISTI `/api/cron/check-registrations` request kao
+registracijski/nepotpuni-podaci checkovi (treći `Promise.all` element) -
+namjerno BEZ novog Vercel cron entryja (isti razlog kao servisna knjižica/
+CSV notifikacija ranije - rizik od probijanja plan limita).
+
+**6) On-demand PDF export (`ReportPdf.tsx` + `generateReportPdfBuffer` +
+`GET /api/reports/pdf?from=&to=`).** Gumb "Preuzmi PDF izvještaj" dodan na
+`/vehicles/stats` (koristi VEĆ postojeći date-range selektor s tog dashboarda
+- "in-app prikaz" iz zahtjeva je time već pokriven POSTOJEĆOM stranicom iz
+prošlog nastavka, nije trebala nova stranica, samo PDF-export nadogradnja).
+**PDF se NE sprema na Hetzner** - generira se u letu i streama izravno kao
+download (`Content-Disposition: attachment`) - prvi put u ovom repou da
+generirani PDF NIJE trajno spremljen prije slanja (svi dosadašnji PDF-ovi -
+ugovor/zapisnik/aneks/uvjeti - vežu se uz trajan zapis kao "dokaz", ovaj je
+ephemeralan/parametriziran po pozivu, nema smisla trajno čuvati svaku
+kombinaciju datuma). Nova `styles.table*` pravila u `pdf/styles.ts`
+(prošireno, ne zamijenjeno - ostali PDF-ovi nedirani).
+
+**Usput uhvaćena i popravljena vlastita greška prije verifikacije:**
+`next build` je pukao (ESLint `react/no-unescaped-entities`) na doslovnim
+`"` navodnicima u JSX tekstu unutar `PeriodicReportsSection.tsx` -
+`tsc --noEmit` to ne hvata (ESLint je zaseban build korak), uhvaćeno tek na
+punom `next build` provjeri prije nego je proglašeno gotovim - popravljeno
+HTML entitetima (`&ldquo;`/`&rdquo;`).
+
+**7) Mobile parity - PUNA (korisnik eksplicitno odabrao "settings + PDF"
+opciju** kad pitan, zbog većeg pre-postojećeg gapa: owner-mobile prije ovog
+nastavka NIJE imao NIKAKVU Settings stranicu, ni ovu ni postojeću tvrtka/
+T&C - taj širi gap i dalje ostaje (T&C/logo/company-info NISU portani,
+izvan opsega, samo periodični izvještaji).
+
+**Nova ovisnost `expo-sharing@~57.0.15`** - jedina nova native ovisnost u
+ovom nastavku, dodana `npx expo install expo-sharing` (Expo je sam odabrao
+točnu SDK-57-kompatibilnu verziju). Instalacija je prvo pukla
+(`ERR_PNPM_UNEXPECTED_VIRTUAL_STORE`) jer gola `pnpm add` ne prosljeđuje
+projektov custom `virtual-store-dir=C:/v` (vidi
+`project_dev_server_gotchas` memoriju) - popravljeno ručnim dodavanjem u
+`package.json` + `pnpm install --virtual-store-dir "C:/v"` s root razine.
+**expo-sharing NIJE registriran u `app.json` plugins nizu** - provjeren
+njegov config-plugin `.d.ts` prije odluke (ne nagađanjem): plugin postoji
+samo za iOS Share Extension (PRIMANJE shareova U app), ne za odlazni
+`shareAsync()` koji ovaj zahtjev koristi - nepotreban za ovaj use-case.
+
+**`downloadReportPdf` (`src/lib/api.ts`)** - koristi `File.downloadFileAsync`
+(izvorna podrška za custom headers, provjereno u `expo-file-system` 57.0.2
+`.d.ts` prije korištenja) s Bearer tokenom, sprema u `Paths.cache`,
+`idempotent: true` (isti raspon = isti filename = prepiše, ne baci grešku).
+Vraćeni `File.uri` se prosljeđuje u `Sharing.shareAsync()` na
+`/vehicles/stats` mobile ekranu (novi "Preuzmi PDF izvještaj" gumb) - otvara
+OS share sheet (spremi/pošalji dalje), s `Alert.alert` fallbackom ako
+`Sharing.isAvailableAsync()` vrati `false`.
+
+**Novi `owner/settings.tsx` ekran (prvi ikad u ovom mobile appu)** - SAMO
+periodični izvještaji sekcija (učestalost kao chip-preseti, custom-dana
+tekstualno polje, email-toggle kao chip, isti obrazac kao "na servisu"
+checkbox-zamjena iz servisne knjižice), NE cijeli Settings paritet (tvrtka/
+logo/T&C ostaju web-only, izvan opsega OVOG zahtjeva). Link dodan na
+`owner/home.tsx` glavni izbornik. Nema permission-gating UI-a (mobile nema
+koncept employee permisija uopće - `resolveMobileRole` sve owner-app
+korisnike vraća kao `role:"owner"`, isti obrazac kao ostatak mobile appa -
+backend `requireModulePermission("settings")` i dalje štiti stvaran zapis,
+neovlašten employee bi dobio 403 prikazan kao greška).
+
+**NIJE testirano na fizičkom uređaju/simulatoru - VAŽNIJE upozorenje nego
+inače.** Za razliku od ranijih mobile-port nastavaka (koji su reuse-ali
+postojeće, već native-linked pakete), ovaj put je dodana STVARNO NOVA
+native ovisnost - postojeći build dev-clienta na korisnikovom uređaju NEMA
+`expo-sharing` native modul kompajliran u sebe, pa PDF-share gumb NEĆE
+raditi dok se dev client ne rebuilda (`eas build --profile development` ili
+`expo run:android`/`expo run:ios`) - obični Metro/JS reload NIJE dovoljan za
+nove native module. S obzirom na poznatu krhkost lokalnog Android native
+builda na ovom Windows stroju (vidi `project_dev_server_gotchas`), EAS
+cloud build preporučen umjesto lokalnog `expo run:android`.
+
+**Verifikacija.** `tsc --noEmit` čist na sva tri paketa, `next build` čist
+NAKON popravka lint greške (nova ruta `/api/reports/pdf` vidljiva).
+Migracija primijenjena `prisma migrate deploy` izravno na produkciju (uz
+korisnikovu potvrdu). **Stvaran end-to-end test protiv produkcijske baze**
+(privremena debug ruta bez auth-a, bez `_` prefiksa): pragovi
+(`getReportIntervalDays`/`isReportDue`) testirani izravno kao čiste funkcije
+(off→null, daily/weekly/monthly→1/7/30, custom bez broja→null, custom
+14→14; never-sent→due, sent-today→not-due, sent-6-dana-prije-tjedni→not-due,
+sent-7-dana-prije→due). **READ-ONLY protiv stvarnih produkcijskih podataka**
+(korisnikov eksplicitan zahtjev) - `buildFleetReportData` za zadnjih 7 dana
+na 4 stvarna vozila, zbroj prihoda/troška servisa/profita NEOVISNO ručno
+izračunat i uspoređen - TOČNO se poklapa. PDF generacija testirana na
+istom razdoblju - stvaran buffer, potvrđeno `%PDF` header. Settings
+round-trip testiran (spremljeno custom/10/false, potvrđeno vraćeno točno
+to), **originalne vrijednosti vraćene u `finally` bloku i eksplicitno
+potvrđene upitom nad produkcijskom bazom** (natrag na `off`/`null`/`true`/
+`null` - stanje prije testa). **NIJE pozvan `runPeriodicReportCheck()`
+izravno** (namjerno - poslao bi stvaran mail na produkcijski `OWNER_EMAIL`,
+isti razlog kao ranije u ovom logu za slične testove) - njegove sastavne
+funkcije testirane su odvojeno gore, dovoljno da pokriju logiku bez
+sporednog efekta slanja pravog maila. Debug ruta uklonjena (`git status`
+potvrđuje čist diff). Nije testirano kroz pravi owner login klik u
+browseru niti kroz stvaran cron poziv s `CRON_SECRET`-om - isti razlog kao
+svugdje ranije u ovom logu.
+
+---
+
+**Prijašnji dio (dvadesetdeveti nastavak)** - korisnik zatražio
 ("odradi i na mobitelu") portanje Servisne knjižice na owner-mobile - poznat
 gap eksplicitno flaggan u prošlom nastavku (mobile "Servis" tab je i dalje
 pokazivao "uskoro" placeholder, puna funkcionalnost postojala je samo na

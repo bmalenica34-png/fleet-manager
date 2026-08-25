@@ -193,6 +193,108 @@ export async function sendRegistrationExpiryEmail(params: {
   });
 }
 
+// Circular-import-safe: samo tipovi, periodicReports.ts importa OVAJ modul
+// (email.ts), ne obrnuto - vrijednosni import bi napravio ciklus.
+export interface PeriodicReportEmailVehicleRow {
+  vehicleLabel: string;
+  rentedDays: number;
+  totalDays: number;
+  revenue: number;
+  serviceCost: number;
+  additionalCosts: number;
+  profit: number;
+  status: "good" | "ok" | "bad" | "no_activity";
+}
+
+const STATUS_LABEL_HR: Record<PeriodicReportEmailVehicleRow["status"], string> = {
+  good: "Dobro",
+  ok: "Prosječno",
+  bad: "Loše",
+  no_activity: "Bez aktivnosti",
+};
+
+function eur(value: number): string {
+  return `${value.toFixed(2)} €`;
+}
+
+/**
+ * Automatski periodični izvještaj o profitabilnosti flote - NAMJERNO bez
+ * grafa/slike (nema chart/image-generation biblioteke u projektu, a inline
+ * grafovi u emailu su notorno nepouzdani kroz različite email klijente) -
+ * umjesto toga brojevi u HTML tablici + link na dashboard za vizualni
+ * prikaz, točno fallback koji je zahtjev eksplicitno dopustio.
+ */
+export async function sendPeriodicReportEmail(params: {
+  to: string;
+  data: {
+    from: Date;
+    to: Date;
+    vehicles: PeriodicReportEmailVehicleRow[];
+    totals: {
+      revenue: number;
+      serviceCost: number;
+      additionalCosts: number;
+      profit: number;
+      rentedDays: number;
+      totalDays: number;
+    };
+  };
+  dashboardUrl: string;
+}): Promise<void> {
+  const { data } = params;
+  const rows = [...data.vehicles]
+    .sort((a, b) => b.profit - a.profit)
+    .map(
+      (v) => `
+        <tr>
+          <td style="padding:4px 8px;border-bottom:1px solid #eee;">${v.vehicleLabel}</td>
+          <td style="padding:4px 8px;border-bottom:1px solid #eee;">${v.rentedDays}/${v.totalDays}</td>
+          <td style="padding:4px 8px;border-bottom:1px solid #eee;">${eur(v.revenue)}</td>
+          <td style="padding:4px 8px;border-bottom:1px solid #eee;">${eur(v.serviceCost)}</td>
+          <td style="padding:4px 8px;border-bottom:1px solid #eee;">${eur(v.additionalCosts)}</td>
+          <td style="padding:4px 8px;border-bottom:1px solid #eee;">${eur(v.profit)}</td>
+          <td style="padding:4px 8px;border-bottom:1px solid #eee;">${STATUS_LABEL_HR[v.status]}</td>
+        </tr>`
+    )
+    .join("");
+
+  await sendEmail({
+    to: params.to,
+    subject: `Periodični izvještaj o floti (${formatDate(data.from)} - ${formatDate(data.to)})`,
+    html: `
+      <p>Poštovani/a,</p>
+      <p>Izvještaj o profitabilnosti flote za razdoblje
+      <strong>${formatDate(data.from)} - ${formatDate(data.to)}</strong>:</p>
+      <p>
+        Ukupan prihod: <strong>${eur(data.totals.revenue)}</strong><br/>
+        Ukupan trošak servisa: <strong>${eur(data.totals.serviceCost)}</strong><br/>
+        Ukupni dodatni troškovi (leasing/osiguranje/ostalo): <strong>${eur(data.totals.additionalCosts)}</strong><br/>
+        Ukupan profit: <strong>${eur(data.totals.profit)}</strong><br/>
+        Dana pod ugovorom (zbrojeno preko flote): <strong>${data.totals.rentedDays}/${data.totals.totalDays}</strong>
+      </p>
+      <table style="border-collapse:collapse;width:100%;font-size:14px;">
+        <thead>
+          <tr>
+            <th style="text-align:left;padding:4px 8px;border-bottom:2px solid #ccc;">Vozilo</th>
+            <th style="text-align:left;padding:4px 8px;border-bottom:2px solid #ccc;">Dana pod ugovorom</th>
+            <th style="text-align:left;padding:4px 8px;border-bottom:2px solid #ccc;">Prihod</th>
+            <th style="text-align:left;padding:4px 8px;border-bottom:2px solid #ccc;">Trošak servisa</th>
+            <th style="text-align:left;padding:4px 8px;border-bottom:2px solid #ccc;">Dodatni troškovi</th>
+            <th style="text-align:left;padding:4px 8px;border-bottom:2px solid #ccc;">Profit</th>
+            <th style="text-align:left;padding:4px 8px;border-bottom:2px solid #ccc;">Status</th>
+          </tr>
+        </thead>
+        <tbody>${rows}</tbody>
+      </table>
+      <p style="margin-top:16px;">
+        Za grafički prikaz i prilagodbu razdoblja, pogledaj
+        <a href="${params.dashboardUrl}">statistiku flote na dashboardu</a>.
+      </p>
+      <p>Hvala,<br/>Rent-a-Car Manager</p>
+    `,
+  });
+}
+
 export async function sendSignedAnnexEmail(params: {
   to: string;
   recipientName: string;

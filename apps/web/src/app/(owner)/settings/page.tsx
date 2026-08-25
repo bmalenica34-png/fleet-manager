@@ -3,6 +3,7 @@ import { createClient } from "@/lib/supabase/server";
 import { principalHasPermission, resolveOwnerAppPrincipal } from "@rent-a-car/api/server";
 import SettingsForm from "./SettingsForm";
 import TermsSection from "./TermsSection";
+import PeriodicReportsSection from "./PeriodicReportsSection";
 
 // Settings je jedina stranica gdje se i sam PRISTUP (ne samo submit) gatea
 // server-side - (owner) layout već skriva "Postavke" link za employeeje bez
@@ -24,6 +25,7 @@ export default async function SettingsPage() {
   return (
     <>
       <SettingsForm />
+      <PeriodicReportsSection />
       <TermsSection />
     </>
   );

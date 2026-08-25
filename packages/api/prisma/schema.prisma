@@ -59,6 +59,7 @@ model Vehicle {
   images         VehicleImage[]
   contracts      Contract[]
   serviceRecords ServiceRecord[]
+  vehicleCosts   VehicleCost[]
 
   @@map("vehicles")
 }
@@ -97,6 +98,59 @@ model ServiceRecord {
 
   @@index([vehicleId])
   @@map("service_records")
+}
+
+// ---------------------------------------------------------------------------
+// VehicleCost (dodatni troškovi izvan servisne knjižice - leasing, kasko...)
+// ---------------------------------------------------------------------------
+
+// Diskretne kategorije (za razliku od ServiceRecord.provider, koji je
+// namjerno slobodan tekst) - zahtjev eksplicitno nabraja 4 kategorije
+// uklj. "ostalo", pa je enum korisniji za buduće filtriranje/izvještavanje
+// nego slobodan tekst. `other` nosi `customType` za detalj.
+enum VehicleCostType {
+  leasing
+  insurance
+  kasko
+  other
+}
+
+enum InstallmentFrequency {
+  monthly
+  quarterly
+  yearly
+}
+
+// Jedan trošak vozila IZVAN servisne knjižice (koja prati pojedinačne
+// servisne intervencije) - ili jednokratan (`date` postavljen) ili rata
+// (`isInstallment=true`, `installmentFrequency`+`startDate` postavljeni,
+// `endDate` null = "do daljnjega"/traje i dalje). App-level invarijanta
+// (ne DB constraint - vidi "trust internal code" konvenciju svugdje u ovoj
+// shemi): TOČNO jedan od (`date`) / (`installmentFrequency`+`startDate`)
+// seta je postavljen, ovisno o `isInstallment`. Rate se pro-rata računaju
+// za odabrano razdoblje (server/vehicleStats.ts), NE upisuju se kao
+// pojedinačni redci po mjesecu - jedan red opisuje cijeli tekući ugovor
+// (npr. leasing), izračun "koliko u ovom razdoblju" je uvijek izveden.
+model VehicleCost {
+  id         String          @id @default(cuid())
+  vehicleId  String
+  vehicle    Vehicle         @relation(fields: [vehicleId], references: [id], onDelete: Cascade)
+  costType   VehicleCostType
+  customType String? // detalj kad je costType "other"
+  amount     Float // za ratu: iznos PO UČESTALOSTI (npr. mjesečna rata), ne ukupan iznos ugovora
+
+  isInstallment        Boolean               @default(false)
+  installmentFrequency InstallmentFrequency? // postavljeno SAMO ako isInstallment
+  startDate            DateTime? // postavljeno SAMO ako isInstallment
+  endDate              DateTime? // null = "do daljnjega" (rata i dalje traje)
+
+  date DateTime? // postavljeno SAMO ako NE isInstallment (jednokratan trošak)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([vehicleId])
+  @@map("vehicle_costs")
 }
 
 // ---------------------------------------------------------------------------
@@ -193,6 +247,14 @@ model EmployeePermission {
 // CompanySettings
 // ---------------------------------------------------------------------------
 
+enum ReportFrequency {
+  off
+  daily
+  weekly
+  monthly
+  custom
+}
+
 // Singleton (jedan fiksni red, id uvijek "singleton") - app je single-tenant
 // (jedna rent-a-car tvrtka spram cijele baze, vidi CLAUDE.md), pa nema
 // potrebe za FK na Owner/tenantId. Prikazuje se u zaglavlju i potpisnom
@@ -210,6 +272,17 @@ model CompanySettings {
   // NIJE implementirano (potpisni blok je trenutno čisto tekstualni), ovo
   // polje samo osigurava da ga se kasnije može dodati bez izmjene sheme.
   digitalCertificateKey String?
+
+  // Periodični izvještaji o floti (server/periodicReports.ts). Default
+  // "off" - postojeći produkcijski račun ne počinje neočekivano primati
+  // automatske mailove dok vlasnik sam ne uključi u /settings. Interval se
+  // svugdje tretira kao "dana od zadnjeg slanja" (daily=1/weekly=7/
+  // monthly=30/custom=reportCustomIntervalDays), NE kalendarski dan/tjedan/
+  // mjesec - jednostavnije i dosljedno s "custom N dana" opcijom.
+  reportFrequency          ReportFrequency @default(off)
+  reportCustomIntervalDays Int? // koristi se SAMO kad je reportFrequency "custom"
+  reportEmailEnabled       Boolean         @default(true)
+  lastReportSentAt         DateTime? // dedupe - isti obrazac kao registrationReminder*SentAt
 
   updatedAt DateTime @updatedAt
 

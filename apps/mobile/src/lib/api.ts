@@ -1,4 +1,4 @@
-import { File, UploadType } from "expo-file-system";
+import { File, Paths, UploadType } from "expo-file-system";
 import { supabase } from "./supabase";
 
 const API_BASE_URL = process.env.EXPO_PUBLIC_API_BASE_URL!;
@@ -490,6 +490,7 @@ export interface VehicleStatsDTO {
   freeDays: number;
   revenue: number;
   serviceCost: number;
+  additionalCosts: number;
   profit: number;
   utilization: number;
   status: VehicleStatsStatus;
@@ -502,4 +503,118 @@ export function getVehicleStats(vehicleId: string, from: string, to: string): Pr
 
 export function getFleetStats(from: string, to: string): Promise<VehicleStatsDTO[]> {
   return apiFetch(`/api/vehicles/stats?from=${from}&to=${to}`);
+}
+
+export interface StatsTimeSeriesPoint {
+  label: string;
+  revenue: number;
+  serviceCost: number;
+  additionalCosts: number;
+  profit: number;
+}
+
+/** `vehicleId: null` = "sva vozila zajedno" (isti selektor kao web dashboard). */
+export function getStatsTimeSeries(
+  vehicleId: string | null,
+  from: string,
+  to: string
+): Promise<StatsTimeSeriesPoint[]> {
+  const vehicleParam = vehicleId ? `&vehicleId=${vehicleId}` : "";
+  return apiFetch(`/api/stats/timeseries?from=${from}&to=${to}${vehicleParam}`);
+}
+
+// --- Dodatni troškovi vozila (leasing/osiguranje/kasko/ostalo) ---
+export type VehicleCostType = "leasing" | "insurance" | "kasko" | "other";
+export type InstallmentFrequency = "monthly" | "quarterly" | "yearly";
+
+export interface VehicleCostDTO {
+  id: string;
+  vehicleId: string;
+  costType: VehicleCostType;
+  customType: string | null;
+  amount: number;
+  isInstallment: boolean;
+  installmentFrequency: InstallmentFrequency | null;
+  startDate: string | null;
+  endDate: string | null;
+  date: string | null;
+}
+
+export interface VehicleCostCreateInput {
+  costType: VehicleCostType;
+  customType?: string;
+  amount: number;
+  isInstallment: boolean;
+  installmentFrequency?: InstallmentFrequency;
+  startDate?: string;
+  endDate?: string;
+  date?: string;
+}
+
+export function listVehicleCosts(vehicleId: string): Promise<VehicleCostDTO[]> {
+  return apiFetch(`/api/vehicles/${vehicleId}/costs`);
+}
+
+export function createVehicleCost(vehicleId: string, input: VehicleCostCreateInput): Promise<VehicleCostDTO> {
+  return apiFetch(`/api/vehicles/${vehicleId}/costs`, { method: "POST", body: JSON.stringify(input) });
+}
+
+export function deleteVehicleCost(vehicleId: string, costId: string): Promise<void> {
+  return apiFetch(`/api/vehicles/${vehicleId}/costs/${costId}`, { method: "DELETE" });
+}
+
+/**
+ * On-demand PDF izvještaj - preuzima se izravno (autentificiran Bearer
+ * headerom, isti obrazac kao apiFetch/uploadPickedFile) preko
+ * `File.downloadFileAsync` (izvorna podrška za custom headers, vidi
+ * expo-file-system 57.0.2 .d.ts - provjeren prije korištenja, ne
+ * nagađanjem, isto kao svugdje drugdje u ovom fajlu). Vraća lokalni `File`
+ * (u cache direktoriju) - pozivatelj ga prosljeđuje u `expo-sharing`.
+ */
+export async function downloadReportPdf(from: string, to: string): Promise<File> {
+  const {
+    data: { session },
+  } = await supabase.auth.getSession();
+
+  const headers: Record<string, string> = {};
+  if (session?.access_token) {
+    headers.Authorization = `Bearer ${session.access_token}`;
+  }
+
+  return File.downloadFileAsync(`${API_BASE_URL}/api/reports/pdf?from=${from}&to=${to}`, Paths.cache, {
+    headers,
+    idempotent: true,
+  });
+}
+
+// --- Postavke tvrtke (samo periodični izvještaji - jedini dio Settings-a
+// koji owner-mobile trenutno treba; ostatak Settingsa - podaci tvrtke/logo/
+// uvjeti najma - ostaje web-only, izvan opsega ovog zahtjeva) ---
+export type ReportFrequency = "off" | "daily" | "weekly" | "monthly" | "custom";
+
+export interface CompanyReportSettingsDTO {
+  reportFrequency: ReportFrequency;
+  reportCustomIntervalDays: number | null;
+  reportEmailEnabled: boolean;
+  lastReportSentAt: string | null;
+}
+
+export interface CompanyReportSettingsUpdateInput {
+  reportFrequency: ReportFrequency;
+  reportCustomIntervalDays?: number;
+  reportEmailEnabled: boolean;
+}
+
+// GET /api/settings vraća PUN CompanySettingsDTO (ime tvrtke, OIB, logo,
+// itd.) - ovaj tip namjerno čita SAMO report polja koja mobile UI prikazuje
+// (strukturno kompatibilno, TS ne prigovara na "višak" polja u stvarnom
+// JSON odgovoru).
+export function getCompanyReportSettings(): Promise<CompanyReportSettingsDTO> {
+  return apiFetch("/api/settings");
+}
+
+export function updateCompanyReportSettings(
+  input: CompanyReportSettingsUpdateInput
+): Promise<CompanyReportSettingsDTO> {
+  return apiFetch("/api/settings", { method: "PATCH", body: JSON.stringify(input) });
 }
