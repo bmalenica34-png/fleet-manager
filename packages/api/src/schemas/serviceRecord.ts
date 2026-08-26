@@ -13,6 +13,7 @@ export const serviceRecordCreateSchema = z.object({
   description: z.string().min(1),
   partsCost: z.coerce.number().min(0),
   laborCost: z.coerce.number().min(0),
+  partsSupplier: z.string().min(1).optional(),
   provider: z.string().min(1).optional(),
 });
 export type ServiceRecordCreateInput = z.infer<typeof serviceRecordCreateSchema>;

@@ -97,6 +97,12 @@ model ServiceRecord {
   cost        Float?
   partsCost   Float?
   laborCost   Float?
+  // Dobavljač DIJELOVA (npr. auto-dijelovi trgovina) - odvojeno od `provider`
+  // (servis/mehaničar koji je odradio rad). Oba imaju autocomplete "memoriju"
+  // prijašnjih unosa u UI-u (vidi getServiceRecordSuggestions u server/
+  // serviceRecords.ts) - fleet-wide, ne po vozilu, jer isti dobavljač/servis
+  // se tipično koristi za više vozila u floti.
+  partsSupplier String?
   provider    String?
   receiptKey  String? // račun/dokument (S3 key na Hetzneru, ne raw URL)
 

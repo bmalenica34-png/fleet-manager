@@ -163,6 +163,7 @@ export default function VehicleDetailPage() {
   const [serviceDate, setServiceDate] = useState("");
   const [serviceDescription, setServiceDescription] = useState("");
   const [servicePartsCost, setServicePartsCost] = useState("0");
+  const [servicePartsSupplier, setServicePartsSupplier] = useState("");
   const [serviceLaborCost, setServiceLaborCost] = useState("0");
   const [serviceProvider, setServiceProvider] = useState("");
   const [serviceReceiptFile, setServiceReceiptFile] = useState<File | null>(null);
@@ -170,6 +171,11 @@ export default function VehicleDetailPage() {
   const [savingServiceRecord, setSavingServiceRecord] = useState(false);
   const [serviceRecordError, setServiceRecordError] = useState<string | null>(null);
   const [deletingServiceRecordId, setDeletingServiceRecordId] = useState<string | null>(null);
+  // Autocomplete "memorija" za stalne mehaničare/dobavljače dijelova -
+  // fleet-wide (vidi getServiceRecordSuggestions), učitava se jednom uz
+  // ostatak servisne knjižice.
+  const [providerSuggestions, setProviderSuggestions] = useState<string[]>([]);
+  const [partsSupplierSuggestions, setPartsSupplierSuggestions] = useState<string[]>([]);
 
   // Dodatni troškovi (leasing/osiguranje/kasko/ostalo) - izvan servisne
   // knjižice, isti "učitava se odmah, neovisno o tabu" obrazac kao service
@@ -280,6 +286,19 @@ export default function VehicleDetailPage() {
     loadServiceRecords();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [vehicleId]);
+
+  function loadServiceRecordSuggestions() {
+    fetch("/api/service-records/suggestions")
+      .then((res) => res.json())
+      .then((data: { providers: string[]; partsSuppliers: string[] }) => {
+        setProviderSuggestions(data.providers);
+        setPartsSupplierSuggestions(data.partsSuppliers);
+      });
+  }
+
+  useEffect(() => {
+    loadServiceRecordSuggestions();
+  }, []);
 
   const totalServiceCost = serviceRecords.reduce((sum, r) => sum + r.total, 0);
 
@@ -426,6 +445,7 @@ export default function VehicleDetailPage() {
     formData.append("description", serviceDescription.trim());
     formData.append("partsCost", servicePartsCost || "0");
     formData.append("laborCost", serviceLaborCost || "0");
+    if (servicePartsSupplier.trim()) formData.append("partsSupplier", servicePartsSupplier.trim());
     if (serviceProvider.trim()) formData.append("provider", serviceProvider.trim());
     if (serviceReceiptFile) formData.append("receipt", serviceReceiptFile);
 
@@ -456,11 +476,13 @@ export default function VehicleDetailPage() {
     setServiceDate("");
     setServiceDescription("");
     setServicePartsCost("0");
+    setServicePartsSupplier("");
     setServiceLaborCost("0");
     setServiceProvider("");
     setServiceReceiptFile(null);
     setServiceMarkUnderService(false);
     loadServiceRecords();
+    loadServiceRecordSuggestions();
     load();
   }
 
@@ -1165,12 +1187,17 @@ export default function VehicleDetailPage() {
           <form onSubmit={handleAddServiceRecord}>
             <label>
               Datum
-              <input
-                type="date"
-                value={serviceDate}
-                onChange={(e) => setServiceDate(e.target.value)}
-                required
-              />
+              <div style={{ display: "flex", gap: "0.5rem", alignItems: "center" }}>
+                <input
+                  type="date"
+                  value={serviceDate}
+                  onChange={(e) => setServiceDate(e.target.value)}
+                  required
+                />
+                <button type="button" className="btn" onClick={() => setServiceDate(todayIsoDate())}>
+                  Danas
+                </button>
+              </div>
             </label>
             <label>
               Razlog
@@ -1192,6 +1219,20 @@ export default function VehicleDetailPage() {
               />
             </label>
             <label>
+              Dobavljač
+              <input
+                list="parts-supplier-suggestions"
+                value={servicePartsSupplier}
+                onChange={(e) => setServicePartsSupplier(e.target.value)}
+                placeholder="npr. Auto dijelovi Perić"
+              />
+              <datalist id="parts-supplier-suggestions">
+                {partsSupplierSuggestions.map((s) => (
+                  <option key={s} value={s} />
+                ))}
+              </datalist>
+            </label>
+            <label>
               Cijena rada (EUR)
               <input
                 type="number"
@@ -1202,12 +1243,18 @@ export default function VehicleDetailPage() {
               />
             </label>
             <label>
-              Servis / dobavljač
+              Servis
               <input
+                list="service-provider-suggestions"
                 value={serviceProvider}
                 onChange={(e) => setServiceProvider(e.target.value)}
                 placeholder="npr. Autoservis Horvat"
               />
+              <datalist id="service-provider-suggestions">
+                {providerSuggestions.map((s) => (
+                  <option key={s} value={s} />
+                ))}
+              </datalist>
             </label>
             <label>
               Račun / dokument (opcionalno)
@@ -1248,6 +1295,7 @@ export default function VehicleDetailPage() {
                   <th>Datum</th>
                   <th>Razlog</th>
                   <th>Dijelovi</th>
+                  <th>Dobavljač</th>
                   <th>Rad</th>
                   <th>Ukupno</th>
                   <th>Servis</th>
@@ -1261,6 +1309,7 @@ export default function VehicleDetailPage() {
                     <td>{formatDateHr(r.date)}</td>
                     <td>{r.description}</td>
                     <td>{r.partsCost != null ? `${r.partsCost.toFixed(2)} €` : <span className="muted">—</span>}</td>
+                    <td>{r.partsSupplier ?? <span className="muted">—</span>}</td>
                     <td>{r.laborCost != null ? `${r.laborCost.toFixed(2)} €` : <span className="muted">—</span>}</td>
                     <td>{r.total.toFixed(2)} €</td>
                     <td>{r.provider ?? <span className="muted">—</span>}</td>

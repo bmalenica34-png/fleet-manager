@@ -11,6 +11,7 @@ export interface ServiceRecordDTO {
   partsCost: number | null;
   laborCost: number | null;
   total: number;
+  partsSupplier: string | null;
   provider: string | null;
   receiptUrl: string | null;
   createdAt: Date;
@@ -47,6 +48,7 @@ async function toServiceRecordDTO(record: ServiceRecord): Promise<ServiceRecordD
     partsCost: record.partsCost,
     laborCost: record.laborCost,
     total: serviceRecordTotal(record),
+    partsSupplier: record.partsSupplier,
     provider: record.provider,
     receiptUrl: record.receiptKey ? await getPresignedDownloadUrl(record.receiptKey) : null,
     createdAt: record.createdAt,
@@ -78,4 +80,39 @@ export async function deleteServiceRecord(id: string): Promise<void> {
   if (!record) return;
   if (record.receiptKey) await deleteObject(record.receiptKey);
   await prisma.serviceRecord.delete({ where: { id } });
+}
+
+export interface ServiceRecordSuggestions {
+  providers: string[];
+  partsSuppliers: string[];
+}
+
+/**
+ * Distinct prijašnje unesene vrijednosti za "Servis" i "Dobavljač" polja -
+ * FLEET-WIDE (svi zapisi, ne samo za jedno vozilo), jer korisnik tipično
+ * koristi iste stalne mehaničare/dobavljače dijelova za više vozila u
+ * floti. Poredano po zadnjoj upotrebi (najnovije prvo) - koristi se za
+ * autocomplete "memoriju" u formi novog servisnog zapisa (web `<datalist>`,
+ * mobile tap-to-fill chipovi).
+ */
+export async function getServiceRecordSuggestions(): Promise<ServiceRecordSuggestions> {
+  const [providerRows, supplierRows] = await Promise.all([
+    prisma.serviceRecord.findMany({
+      where: { provider: { not: null } },
+      select: { provider: true },
+      distinct: ["provider"],
+      orderBy: { createdAt: "desc" },
+    }),
+    prisma.serviceRecord.findMany({
+      where: { partsSupplier: { not: null } },
+      select: { partsSupplier: true },
+      distinct: ["partsSupplier"],
+      orderBy: { createdAt: "desc" },
+    }),
+  ]);
+
+  return {
+    providers: providerRows.map((r) => r.provider!),
+    partsSuppliers: supplierRows.map((r) => r.partsSupplier!),
+  };
 }

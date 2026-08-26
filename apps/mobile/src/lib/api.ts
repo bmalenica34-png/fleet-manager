@@ -463,6 +463,7 @@ export interface ServiceRecordDTO {
   partsCost: number | null;
   laborCost: number | null;
   total: number;
+  partsSupplier: string | null;
   provider: string | null;
   receiptUrl: string | null;
   createdAt: string;
@@ -473,7 +474,18 @@ export interface ServiceRecordCreateInput {
   description: string;
   partsCost: number;
   laborCost: number;
+  partsSupplier?: string;
   provider?: string;
+}
+
+export interface ServiceRecordSuggestions {
+  providers: string[];
+  partsSuppliers: string[];
+}
+
+/** Fleet-wide autocomplete "memorija" za stalne mehaničare/dobavljače dijelova - isto kao web `<datalist>`. */
+export function getServiceRecordSuggestions(): Promise<ServiceRecordSuggestions> {
+  return apiFetch("/api/service-records/suggestions");
 }
 
 export function listServiceRecords(vehicleId: string): Promise<ServiceRecordDTO[]> {
@@ -496,6 +508,7 @@ export function createServiceRecord(
   formData.append("description", input.description);
   formData.append("partsCost", String(input.partsCost));
   formData.append("laborCost", String(input.laborCost));
+  if (input.partsSupplier) formData.append("partsSupplier", input.partsSupplier);
   if (input.provider) formData.append("provider", input.provider);
   return apiFetch(`/api/vehicles/${vehicleId}/service-records`, { method: "POST", body: formData });
 }
@@ -511,6 +524,7 @@ export function createServiceRecordWithReceipt(
     description: input.description,
     partsCost: String(input.partsCost),
     laborCost: String(input.laborCost),
+    ...(input.partsSupplier ? { partsSupplier: input.partsSupplier } : {}),
     ...(input.provider ? { provider: input.provider } : {}),
   });
 }

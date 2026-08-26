@@ -4,6 +4,57 @@ Dinamički log stanja projekta. Ažurira se na kraju svake sesije. Za statičnu
 arhitekturu/konvencije vidi [CLAUDE.md](CLAUDE.md) — ovaj dokument je "što je
 gotovo i zašto", ne "kako treba izgledati".
 
+**Zadnje ažurirano:** 2026-08-26, tridesetčetvrti nastavak - dva mala
+dodatka na servisnu knjižicu iz prošlog nastavka: "Danas" prečac za datum,
+i dobavljač dijelova + autocomplete "memorija" za servis/dobavljač.
+
+**1) "Danas" gumb kraj datuma.** Web: mali `<button>` kraj `<input
+type=date>` koji zove postojeći modul-level `todayIsoDate()` helper
+(već je postojao za statistiku raspon, samo ponovno iskorišten). Mobile:
+`Field` komponenta dobila opcionalan `onTodayPress` prop (ne dira ostale
+pozive Field-a u fajlu koji ga ne prosljeđuju) - postavlja
+`isoToHrDate(todayIsoDate())` u tekstualno DD.MM.GGGG. polje.
+
+**2) Novo `ServiceRecord.partsSupplier` polje** (dobavljač DIJELOVA,
+odvojeno od postojećeg `provider` koji sad znači isključivo "servis/
+mehaničar koji je odradio rad") - migracija
+`20260826180000_add_service_record_parts_supplier`, čisto aditivna
+(jedan nullable stupac), primijenjena uz eksplicitnu potvrdu korisnika
+(isto novo pravilo kao prošli nastavak). Pozicionirano u formi/tablici
+odmah ispod "Cijena dijelova" (korisnikov eksplicitan zahtjev "ispod
+cijene dijelova neka piše dobavljač"). Web tablica dobila stupac
+"Dobavljač"; postojeći "Servis / dobavljač" label preimenovan u samo
+"Servis" (razdvojeno značenje sad ima smisla - dobavljač ima svoje
+polje).
+
+**3) Autocomplete "memorija" za oba polja** (`provider` i `partsSupplier`)
+- `getServiceRecordSuggestions()` (server/serviceRecords.ts) vraća distinct
+prijašnje vrijednosti FLEET-WIDE (svi zapisi, ne po vozilu - "stalni
+mehaničari/dobavljači" se tipično koriste za više vozila), poredano
+najnovije-prvo. Nova ruta `GET /api/service-records/suggestions`
+(top-level, ne vezana na vehicleId). Web: native `<datalist>` (ZERO novih
+ovisnosti - CLAUDE.md pravilo "ne dodavati pakete bez pitanja", ovo je bio
+ugrađen HTML mehanizam pa nije ni trebalo pitati). Mobile: RN nema native
+datalist ekvivalent - `Field` komponenta dobila opcionalan `suggestions`
+prop, prikazuje tap-to-fill chipove ispod polja (filtrirano prefiksom
+trenutnog unosa, max 6), isti `styles.chip`/`chipText` koji već postoje u
+fajlu (ništa novo stilizirano). Suggestions se re-fetch-aju nakon svakog
+uspješnog dodavanja zapisa (novo ime mehaničara/dobavljača odmah dostupno
+za sljedeći unos, ne tek nakon reloada stranice).
+
+**Verifikacija.** `tsc --noEmit` čisto na sva tri paketa, `next build`
+prošao (nova `/api/service-records/suggestions` ruta vidljiva u outputu).
+End-to-end test izravno protiv produkcijske baze (isti `npx tsx` obrazac):
+kreiran zapis s jedinstvenim (timestamp-suffiksiranim) `provider`/
+`partsSupplier` vrijednostima → `getServiceRecordSuggestions()` ih
+ODMAH vraća u listi (potvrđuje da se novi unos odmah pojavljuje kao
+buduća sugestija, bez cache/dedupe kašnjenja). Test zapis obrisan nakon
+verifikacije, `.env` u `packages/api/` uklonjen. Puni login-flow UI test
+(vizualna provjera datalista/chipova, klik na "Danas") PRESKOČEN - isto
+poznato PKCE ograničenje kao prošla dva nastavka.
+
+---
+
 **Zadnje ažurirano:** 2026-08-26, tridesettreći nastavak - servisna knjižica
 (`ServiceRecord`) proširena: trošak razdvojen na dijelove+rad, uz legacy
 fallback za stare zapise, provučeno kroz cijeli statistički lanac.

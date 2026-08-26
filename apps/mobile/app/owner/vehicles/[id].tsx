@@ -32,6 +32,7 @@ import {
   deleteServiceRecord,
   deleteVehicleCost,
   deleteVehicleImage,
+  getServiceRecordSuggestions,
   getVehicle,
   getVehicleStats,
   listContracts,
@@ -200,6 +201,7 @@ export default function VehicleDetail() {
   const [serviceDateHr, setServiceDateHr] = useState("");
   const [serviceDescription, setServiceDescription] = useState("");
   const [servicePartsCost, setServicePartsCost] = useState("0");
+  const [servicePartsSupplier, setServicePartsSupplier] = useState("");
   const [serviceLaborCost, setServiceLaborCost] = useState("0");
   const [serviceProvider, setServiceProvider] = useState("");
   const [serviceReceiptFile, setServiceReceiptFile] = useState<PickedFile | null>(null);
@@ -207,6 +209,10 @@ export default function VehicleDetail() {
   const [savingServiceRecord, setSavingServiceRecord] = useState(false);
   const [serviceRecordError, setServiceRecordError] = useState<string | null>(null);
   const [deletingServiceRecordId, setDeletingServiceRecordId] = useState<string | null>(null);
+  // Autocomplete "memorija" za stalne mehaničare/dobavljače dijelova -
+  // fleet-wide (isti /api/service-records/suggestions kao web).
+  const [providerSuggestions, setProviderSuggestions] = useState<string[]>([]);
+  const [partsSupplierSuggestions, setPartsSupplierSuggestions] = useState<string[]>([]);
 
   // Dodatni troškovi (leasing/osiguranje/kasko/ostalo) - izvan servisne
   // knjižice, isti "chip" toggle/tekstualni-datum obrazac kao ostatak fajla.
@@ -293,9 +299,22 @@ export default function VehicleDetail() {
       .finally(() => setServiceRecordsLoading(false));
   }, [id]);
 
+  const loadServiceRecordSuggestions = useCallback(() => {
+    getServiceRecordSuggestions()
+      .then((data) => {
+        setProviderSuggestions(data.providers);
+        setPartsSupplierSuggestions(data.partsSuppliers);
+      })
+      .catch(() => {});
+  }, []);
+
   useEffect(() => {
     loadServiceRecords();
   }, [loadServiceRecords]);
+
+  useEffect(() => {
+    loadServiceRecordSuggestions();
+  }, [loadServiceRecordSuggestions]);
 
   const totalServiceCost = serviceRecords.reduce((sum, r) => sum + r.total, 0);
 
@@ -430,6 +449,7 @@ export default function VehicleDetail() {
         description: serviceDescription.trim(),
         partsCost,
         laborCost,
+        partsSupplier: servicePartsSupplier.trim() || undefined,
         provider: serviceProvider.trim() || undefined,
       };
 
@@ -450,11 +470,13 @@ export default function VehicleDetail() {
       setServiceDateHr("");
       setServiceDescription("");
       setServicePartsCost("0");
+      setServicePartsSupplier("");
       setServiceLaborCost("0");
       setServiceProvider("");
       setServiceReceiptFile(null);
       setServiceMarkUnderService(false);
       loadServiceRecords();
+      loadServiceRecordSuggestions();
       load();
     } catch (err) {
       setServiceRecordError(err instanceof Error ? err.message : "Greška prilikom spremanja zapisa");
@@ -1143,6 +1165,7 @@ export default function VehicleDetail() {
             value={serviceDateHr}
             onChangeText={setServiceDateHr}
             placeholder="24.08.2026."
+            onTodayPress={() => setServiceDateHr(isoToHrDate(todayIsoDate()))}
           />
           <Field
             label="Razlog"
@@ -1157,16 +1180,24 @@ export default function VehicleDetail() {
             keyboardType="number-pad"
           />
           <Field
+            label="Dobavljač"
+            value={servicePartsSupplier}
+            onChangeText={setServicePartsSupplier}
+            placeholder="npr. Auto dijelovi Perić"
+            suggestions={partsSupplierSuggestions}
+          />
+          <Field
             label="Cijena rada (EUR)"
             value={serviceLaborCost}
             onChangeText={setServiceLaborCost}
             keyboardType="number-pad"
           />
           <Field
-            label="Servis / dobavljač"
+            label="Servis"
             value={serviceProvider}
             onChangeText={setServiceProvider}
             placeholder="npr. Autoservis Horvat"
+            suggestions={providerSuggestions}
           />
 
           <Text style={styles.fieldLabel}>Račun / dokument (opcionalno)</Text>
@@ -1214,7 +1245,8 @@ export default function VehicleDetail() {
                     Dijelovi: {r.partsCost != null ? `${r.partsCost.toFixed(2)} €` : "—"} · Rad:{" "}
                     {r.laborCost != null ? `${r.laborCost.toFixed(2)} €` : "—"} · Ukupno: {r.total.toFixed(2)} €
                   </Text>
-                  {r.provider && <Text style={styles.muted}>{r.provider}</Text>}
+                  {r.partsSupplier && <Text style={styles.muted}>Dobavljač: {r.partsSupplier}</Text>}
+                  {r.provider && <Text style={styles.muted}>Servis: {r.provider}</Text>}
                   {r.receiptUrl && (
                     <Pressable onPress={() => Linking.openURL(r.receiptUrl!)}>
                       <Text style={styles.link}>Pregledaj račun</Text>
@@ -1469,10 +1501,28 @@ function Field(props: {
   onChangeText: (value: string) => void;
   placeholder?: string;
   keyboardType?: "default" | "number-pad";
+  // "Danas" prečac (samo za datum polja) - opcionalan, ne dira ostale
+  // pozive Field-a u fajlu koji ga ne prosljeđuju.
+  onTodayPress?: () => void;
+  // Autocomplete "memorija" prijašnjih unosa (mehaničari/dobavljači) - RN
+  // nema native <datalist> (isti obrazac kao web), pa se prikazuje kao
+  // tap-to-fill chipovi ispod polja, filtrirani po trenutnom tekstu.
+  suggestions?: string[];
 }) {
+  const filteredSuggestions = (props.suggestions ?? [])
+    .filter((s) => !props.value.trim() || s.toLowerCase().includes(props.value.trim().toLowerCase()))
+    .slice(0, 6);
+
   return (
     <View style={styles.field}>
-      <Text style={styles.fieldLabel}>{props.label}</Text>
+      <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
+        <Text style={styles.fieldLabel}>{props.label}</Text>
+        {props.onTodayPress && (
+          <Pressable onPress={props.onTodayPress}>
+            <Text style={styles.link}>Danas</Text>
+          </Pressable>
+        )}
+      </View>
       <TextInput
         style={styles.input}
         value={props.value}
@@ -1481,6 +1531,15 @@ function Field(props: {
         keyboardType={props.keyboardType}
         autoCapitalize="none"
       />
+      {filteredSuggestions.length > 0 && (
+        <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6, marginTop: 6 }}>
+          {filteredSuggestions.map((s) => (
+            <Pressable key={s} style={styles.chip} onPress={() => props.onChangeText(s)}>
+              <Text style={styles.chipText}>{s}</Text>
+            </Pressable>
+          ))}
+        </View>
+      )}
     </View>
   );
 }
