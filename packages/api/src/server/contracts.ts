@@ -4,6 +4,7 @@ import { sendContractSigningEmail } from "../lib/email";
 import type { ContractCreateInput } from "../schemas/contract";
 import { generateSigningToken } from "../lib/signing-token";
 import { getPresignedDownloadUrl } from "../storage/hetzner";
+import { createRentPaymentsForContract } from "./rentPayments";
 
 function getSigningBaseUrl(): string {
   const base = process.env.NEXT_PUBLIC_CLIENT_SIGNING_BASE_URL;
@@ -180,11 +181,21 @@ export async function closeContractEarly(id: string): Promise<ContractWithRelati
   }
 
   const now = new Date();
-  return prisma.contract.update({
+  const updated = await prisma.contract.update({
     where: { id },
     data: { closedAt: now, actualEndDate: now },
     include: { vehicle: true, client: true },
   });
+
+  // Periodi naplate koji se odnose na budućnost nakon stvarnog zatvaranja
+  // "nisu se dogodili" (korisnikov izričaj) - brišu se umjesto zadržavanja
+  // kao "poništeno" jer nema drugog konzumenta koji bi trebao vidjeti
+  // stornirane retke (RentPayment nema statusni prikaz osim plaćeno/nije).
+  await prisma.rentPayment.deleteMany({
+    where: { contractId: id, periodStart: { gt: now } },
+  });
+
+  return updated;
 }
 
 /**
@@ -228,11 +239,20 @@ export async function createContractAndSendSigningEmail(
       odometerEnd: input.odometerEnd,
       pricePerDay: input.pricePerDay,
       excessAmount: input.excessAmount,
+      depositAmount: input.depositAmount,
       paymentMethod: input.paymentMethod,
+      paymentFrequency: input.paymentFrequency,
       createdByOwnerId: createdBy?.kind === "owner" ? createdBy.id : undefined,
       createdByEmployeeId: createdBy?.kind === "employee" ? createdBy.id : undefined,
     },
   });
+
+  // Generira RentPayment raspored unaprijed za weekly/monthly (no-op za
+  // "daily") - vidi server/rentPayments.ts. Namjerno ODMAH pri kreiranju
+  // (draft status), ne tek nakon potpisa - dateFrom/dateTo/pricePerDay su
+  // već finalizirani u ovom trenutku, isti "poznato prije primopredaje"
+  // razlog kao ostala PDF polja.
+  await createRentPaymentsForContract(contract);
 
   const { token, expiresAt } = generateSigningToken({
     subjectId: contract.id,

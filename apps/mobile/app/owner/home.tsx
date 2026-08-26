@@ -127,6 +127,9 @@ export default function OwnerHome() {
         <Pressable style={styles.menuButton} onPress={() => router.push("/owner/contracts")}>
           <Text style={styles.menuText}>Ugovori</Text>
         </Pressable>
+        <Pressable style={styles.menuButton} onPress={() => router.push("/owner/najmovi")}>
+          <Text style={styles.menuText}>Najmovi</Text>
+        </Pressable>
         <Pressable style={styles.menuButton} onPress={() => router.push("/owner/settings")}>
           <Text style={styles.menuText}>Postavke</Text>
         </Pressable>

@@ -62,10 +62,15 @@ export default function NewContractScreen() {
   const [days, setDays] = useState("7");
 
   const [pricePerDay, setPricePerDay] = useState("");
+  const [paymentFrequency, setPaymentFrequency] = useState<"daily" | "weekly" | "monthly">("daily");
   const [pickupLocation, setPickupLocation] = useState("");
   const [odometerStart, setOdometerStart] = useState("");
   const [excessAmount, setExcessAmount] = useState("");
+  const [depositAmount, setDepositAmount] = useState("");
   const [paymentMethod, setPaymentMethod] = useState("");
+
+  const priceFieldLabel =
+    paymentFrequency === "weekly" ? "Cijena/tjedan (EUR)" : paymentFrequency === "monthly" ? "Cijena/mjesec (EUR)" : "Cijena/dan (EUR)";
 
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
@@ -150,7 +155,9 @@ export default function NewContractScreen() {
         pickupLocation: pickupLocation || undefined,
         odometerStart: odometerStart ? Number(odometerStart) : undefined,
         excessAmount: excessAmount ? Number(excessAmount) : undefined,
+        depositAmount: depositAmount ? Number(depositAmount) : undefined,
         paymentMethod: paymentMethod || undefined,
+        paymentFrequency,
       });
       router.replace("/owner/contracts");
     } catch (err) {
@@ -302,7 +309,28 @@ export default function NewContractScreen() {
         </View>
 
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Cijena/dan (EUR)</Text>
+          <Text style={styles.sectionTitle}>Učestalost naplate</Text>
+          <View style={styles.quickRow}>
+            {(["daily", "weekly", "monthly"] as const).map((freq) => (
+              <Pressable
+                key={freq}
+                style={[styles.quickButton, paymentFrequency === freq && styles.optionActive]}
+                onPress={() => setPaymentFrequency(freq)}
+              >
+                <Text style={paymentFrequency === freq ? styles.optionTextActive : styles.optionText}>
+                  {freq === "daily" ? "Dnevno" : freq === "weekly" ? "Tjedno" : "Mjesečno"}
+                </Text>
+              </Pressable>
+            ))}
+          </View>
+          {paymentFrequency !== "daily" && (
+            <Text style={styles.muted}>
+              Cijena ispod predstavlja cijenu PO {paymentFrequency === "weekly" ? "TJEDNU" : "MJESECU"}, ne po
+              danu. Periodi naplate za "Najmovi" generirat će se automatski za cijelo trajanje ugovora.
+            </Text>
+          )}
+
+          <Text style={[styles.sectionTitle, { marginTop: 12 }]}>{priceFieldLabel}</Text>
           <TextInput
             style={styles.input}
             keyboardType="decimal-pad"
@@ -332,6 +360,13 @@ export default function NewContractScreen() {
             keyboardType="decimal-pad"
             value={excessAmount}
             onChangeText={setExcessAmount}
+          />
+          <Text style={[styles.sectionTitle, { fontSize: 14, marginTop: 4 }]}>Depozit / učešće (EUR)</Text>
+          <TextInput
+            style={styles.input}
+            keyboardType="decimal-pad"
+            value={depositAmount}
+            onChangeText={setDepositAmount}
           />
           <Text style={[styles.sectionTitle, { fontSize: 14, marginTop: 4 }]}>Način plaćanja</Text>
           <TextInput

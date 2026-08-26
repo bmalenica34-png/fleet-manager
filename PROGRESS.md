@@ -4,6 +4,108 @@ Dinamički log stanja projekta. Ažurira se na kraju svake sesije. Za statičnu
 arhitekturu/konvencije vidi [CLAUDE.md](CLAUDE.md) — ovaj dokument je "što je
 gotovo i zašto", ne "kako treba izgledati".
 
+**Zadnje ažurirano:** 2026-08-26, tridesetpeti nastavak - praćenje plaćanja
+najma (RentPayment) za weekly/monthly ugovore, uklj. "Najmovi" stranicu,
+notifikacije vlasniku (dospijeće + petkov standing podsjetnik) i email
+upozorenje klijentu za dospjelu neplaćenu naplatu.
+
+**0) Provjera "učešće" polja.** `Contract.excessAmount` ("Učešće u šteti")
+je franšiza/osigurateljni izraz, NE depozit - potvrđeno prije dodavanja
+novog polja. Dodano `Contract.depositAmount` (nullable) kao odvojeno polje,
+labelirano "Depozit / učešće" u formi/PDF-u da se vizualno razlikuje od
+"Učešće u šteti".
+
+**1) `Contract.paymentFrequency`** (enum daily/weekly/monthly, default
+daily - postojeći ugovori nepromijenjeni). weekly/monthly: `pricePerDay`
+(isto polje, drugo značenje - nije preimenovano da se ne dira PDF/ostatak
+koda) predstavlja cijenu PO PERIODU. Forma (web+mobile) jasno označava to
+tekstom kad učestalost nije "daily", i mijenja label polja ("Cijena/tjedan"/
+"Cijena/mjesec").
+
+**2) `RentPayment` model + generacija.** `buildRentPaymentPeriods`
+(`server/rentPayments.ts`) dijeli `[dateFrom, dateTo]` na periode fiksne
+duljine (7/30 dana - isti "monthly=30" pojednostavljeni pristup kao
+`vehicleCosts.ts` pro-rata), zadnji period se odsijeca na `dateTo` bez
+pro-rata umanjenja iznosa (puna cijena po periodu čak i za skraćeni zadnji
+period - korisnikov zahtjev nije tražio pro-rata). `dueDate = periodStart`.
+`createRentPaymentsForContract` se poziva ODMAH pri kreiranju ugovora
+(`createContractAndSendSigningEmail`, ne tek nakon potpisa - dateFrom/
+dateTo/pricePerDay su već finalizirani u tom trenutku, isti razlog kao
+ostala PDF polja). `extendRentPaymentsForContract` se poziva iz
+`completeAnnexSigning` (postojeći renewal/anex flow - provjeren PRIJE
+implementacije, kako je korisnik tražio) - generira periode SAMO za
+produljeni dio (stari `dateTo`+1 dan do novi `dateTo`), nastavljajući
+raspored. `closeContractEarly` sad i BRIŠE (ne samo "poništava") RentPayment
+retke čiji je `periodStart` nakon `actualEndDate` - NEKONDICIONALNO (čak i
+ako su već označeni plaćenima - "nisu se dogodili" je apsolutan kriterij po
+korisnikovom izričaju), verificirano scratch testom da ovo stvarno vrijedi
+i za plaćeni budući period.
+
+**3) "Najmovi" stranica** (`/najmovi` web, `owner/najmovi.tsx` mobile) -
+tablica/lista SVIH RentPayment redaka (svi ugovori/klijenti), redak =
+klijent s gumbom "Plaćeno" (jedan klik, `paid=true`+`paidAt=sada`, bez
+forme). Filter neplaćeno/plaćeno/sve (default neplaćeno), "Ukupno
+neplaćeno" zbroj na vrhu. Nova `GET /api/rent-payments` (bilo koji
+ulogirani owner/employee) + `POST /api/rent-payments/[id]/mark-paid`
+(gated na `invoicing` modul - postojeći permission modul, nije trebalo
+novi).
+
+**4) Notifikacije - `runRentPaymentChecks`** (`server/rentPayments.ts`),
+dodan u ISTI `/api/cron/check-registrations` request kao ostali dnevni
+checkovi (namjerno, isti razlog kao svaki put - Vercel cron plan limit).
+Owner "dospijeva danas" (dueDate=danas, neplaćeno) - dedupe preko novog
+`ownerDueNotifiedAt` polja (isti `*NotifiedAt` obrazac kao
+`incompleteDataNotifiedAt`). Petkov standing podsjetnik (dan u tjednu = 5)
+- BEZ dedupe polja (namjerno - niskorizična, informativna notifikacija,
+slučajni dupli re-run istog petka nije štetan, ne opravdava dodatnu shemu
+kolonu).
+
+**5) Email upozorenje klijentu** - `sendRentPaymentOverdueEmail`, šalje se
+TOČNO 1 dan nakon `dueDate` (isti "milestone-dan" obrazac kao
+`registrationReminders.ts`, samo "poslije" umjesto "prije" - u repou nije
+postojao gotov "X dana nakon" obrazac za izravno kopiranje, pa je 1-dan
+razmak korisnikova pretpostavka primijenjena bez daljnjeg dogovaranja jer
+nije bilo suprotnog signala). Dedupe preko `clientOverdueNotifiedAt`.
+
+**6) PDF ispravak.** `ContractPdf.tsx` je prije množio `pricePerDay × broj
+DANA` za "Ukupno" - za weekly/monthly bi to dalo apsurdno velik iznos
+(cijena/tjedan × broj dana umjesto broj tjedana). Popravljeno da množi s
+brojem PERIODA (ista 7/30-dana logika kao generacija), label polja
+("Cijena/dan/tjedan/mjesec") i "Depozit / učešće" red dodani na PDF.
+
+**7) Mobile paritet.** `owner/najmovi.tsx` (lista + filter chipovi + isti
+"Plaćeno" gumb), `owner/contracts/new.tsx` dobio isti
+frequency-chip-selector + dinamički price label + depositAmount polje,
+`lib/api.ts` proširen s `PaymentFrequency`/`RentPaymentDTO`/
+`listRentPayments`/`markRentPaymentPaid`. Nav gumb na `owner/home.tsx`.
+
+**Verifikacija.** `tsc --noEmit` čisto na sva tri paketa. `next build`
+prošao (jedna ESLint greška usput uhvaćena i popravljena - neescapean navodnik
+u JSX tekstu, `react/no-unescaped-entities`). Migracija
+`20260826200000_add_rent_payment_tracking` (novi enum, dva nova Contract
+stupca, nova `rent_payments` tablica) primijenjena na produkciju nakon
+eksplicitne korisnikove potvrde. **Pun lifecycle end-to-end test protiv
+produkcijske baze** (scratch `.ts` + `npx tsx`, efemeran test vozilo/
+klijent obrisan nakon): kreiran pravi 3-tjedni weekly ugovor kroz
+`createContractAndSendSigningEmail` (poslao i stvaran signing email) → 3
+perioda generirana s točnim datumima/iznosom (100€ svaki); owner
+"dospijeva danas" email poslan + potvrđen dedupe na ponovnom pozivu;
+klijent "dospjelo jučer" email poslan + potvrđen dedupe; treći period
+označen plaćenim → `listRentPayments`/unpaid filter ispravno odražavaju
+promjenu; ugovor prijevremeno zatvoren (usred drugog perioda) → treći
+(budući, već OZNAČEN plaćenim) period ispravno OBRISAN, prva dva ostala.
+Usput uhvaćena i ispravljena greška u samom test scriptu (prvi pokušaj
+zatvaranja pukao na `contract_not_closable` jer testni ugovor nikad nije
+prošao pravi signing flow pa mu je status ostao "sent" - popravljeno ručnim
+postavljanjem statusa na "signed" prije `closeContractEarly` poziva, isti
+"scratch skripta zaobilazi HTTP/signing sloj" obrazac kao ostatak testa).
+Sve provjere prošle nakon fixa. Test podaci i scratch skripte obrisani,
+`.env` u `packages/api/` uklonjen. Puni login-flow UI test (vizualna
+provjera "Najmovi" stranice/forme) PRESKOČEN - isto poznato PKCE
+ograničenje kao prošla tri nastavka.
+
+---
+
 **Zadnje ažurirano:** 2026-08-26, tridesetčetvrti nastavak - dva mala
 dodatka na servisnu knjižicu iz prošlog nastavka: "Danas" prečac za datum,
 i dobavljač dijelova + autocomplete "memorija" za servis/dobavljač.

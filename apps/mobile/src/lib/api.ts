@@ -416,6 +416,8 @@ export function getVehicleActiveContract(vehicleId: string): Promise<ActiveContr
   return apiFetch(`/api/vehicles/${vehicleId}/active-contract`);
 }
 
+export type PaymentFrequency = "daily" | "weekly" | "monthly";
+
 export interface ContractCreateInput {
   vehicleId: string;
   clientId: string;
@@ -425,7 +427,9 @@ export interface ContractCreateInput {
   pickupLocation?: string;
   odometerStart?: number;
   excessAmount?: number;
+  depositAmount?: number;
   paymentMethod?: string;
+  paymentFrequency?: PaymentFrequency;
 }
 
 export function createContract(input: ContractCreateInput): Promise<ContractListItem> {
@@ -673,4 +677,28 @@ export function updateCompanyReportSettings(
   input: CompanyReportSettingsUpdateInput
 ): Promise<CompanyReportSettingsDTO> {
   return apiFetch("/api/settings", { method: "PATCH", body: JSON.stringify(input) });
+}
+
+// --- Najmovi (praćenje plaćanja) ---
+export interface RentPaymentDTO {
+  id: string;
+  contractId: string;
+  contractNumber: number;
+  vehicleLabel: string;
+  clientName: string;
+  periodStart: string;
+  periodEnd: string;
+  amount: number;
+  dueDate: string;
+  paid: boolean;
+  paidAt: string | null;
+}
+
+export function listRentPayments(): Promise<RentPaymentDTO[]> {
+  return apiFetch("/api/rent-payments");
+}
+
+/** Jedan tap "Plaćeno" - isti POST /api/rent-payments/[id]/mark-paid endpoint kao web. */
+export function markRentPaymentPaid(id: string): Promise<RentPaymentDTO> {
+  return apiFetch(`/api/rent-payments/${id}/mark-paid`, { method: "POST" });
 }

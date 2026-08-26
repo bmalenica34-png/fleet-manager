@@ -333,3 +333,64 @@ export async function sendSignedAnnexEmail(params: {
     attachments: [{ filename: "aneks.pdf", content: params.annexPdf }],
   });
 }
+
+// ---------------------------------------------------------------------------
+// Praćenje plaćanja najma (RentPayment) - vidi server/rentPayments.ts
+// ---------------------------------------------------------------------------
+
+export async function sendRentPaymentDueEmail(params: {
+  to: string;
+  clientName: string;
+  vehicleLabel: string;
+  amount: number;
+}): Promise<void> {
+  await sendEmail({
+    to: params.to,
+    subject: `Naplata dospijeva: ${params.clientName}, ${params.amount.toFixed(2)} €, ${params.vehicleLabel}`,
+    html: `
+      <p>Naplata dospijeva danas:</p>
+      <ul>
+        <li>Klijent: <strong>${params.clientName}</strong></li>
+        <li>Iznos: <strong>${params.amount.toFixed(2)} €</strong></li>
+        <li>Vozilo: <strong>${params.vehicleLabel}</strong></li>
+      </ul>
+      <p>Označi kao plaćeno na stranici "Najmovi" čim naplatiš.</p>
+      <p>Hvala,<br/>Rent-a-Car Manager</p>
+    `,
+  });
+}
+
+export async function sendRentPaymentOverdueEmail(params: {
+  to: string;
+  clientName: string;
+  vehicleLabel: string;
+  amount: number;
+  dueDate: Date;
+}): Promise<void> {
+  await sendEmail({
+    to: params.to,
+    subject: `Podsjetnik - dospjela naplata za najam vozila ${params.vehicleLabel}`,
+    html: `
+      <p>Poštovani/a ${params.clientName},</p>
+      <p>Naplata za najam vozila <strong>${params.vehicleLabel}</strong> u iznosu
+      <strong>${params.amount.toFixed(2)} €</strong> je dospjela
+      <strong>${formatDate(params.dueDate)}</strong> i još uvijek nije evidentirana kao plaćena.</p>
+      <p>Molimo podmiri obvezu čim prije, ili nas kontaktiraj ako je plaćanje već izvršeno.</p>
+      <p>Hvala,<br/>Rent-a-Car Manager</p>
+    `,
+  });
+}
+
+export async function sendWeeklyPaymentReminderEmail(params: { to: string }): Promise<void> {
+  await sendEmail({
+    to: params.to,
+    subject: "Podsjetnik - označi naplaćene tjedne najmove",
+    html: `
+      <p>Poštovani/a,</p>
+      <p>Ovo je tjedni podsjetnik da provjeriš i označiš naplaćene najmove na stranici
+      "Najmovi" (posebno korisno za klijente koji plaćaju gotovinski/ručno, bez
+      preciznog datuma dospijeća).</p>
+      <p>Hvala,<br/>Rent-a-Car Manager</p>
+    `,
+  });
+}

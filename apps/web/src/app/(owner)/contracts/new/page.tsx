@@ -78,6 +78,14 @@ export default function NewContractPage() {
   const [dateFrom, setDateFrom] = useState(todayIso());
   const [days, setDays] = useState("7");
   const [pricePerDay, setPricePerDay] = useState("");
+  const [paymentFrequency, setPaymentFrequency] = useState<"daily" | "weekly" | "monthly">("daily");
+
+  const priceFieldLabel =
+    paymentFrequency === "weekly"
+      ? "Cijena/tjedan (EUR)"
+      : paymentFrequency === "monthly"
+        ? "Cijena/mjesec (EUR)"
+        : "Cijena/dan (EUR)";
 
   useEffect(() => {
     fetch("/api/vehicles")
@@ -112,6 +120,7 @@ export default function NewContractPage() {
     const pickupLocation = formData.get("pickupLocation");
     const odometerStart = formData.get("odometerStart");
     const excessAmount = formData.get("excessAmount");
+    const depositAmount = formData.get("depositAmount");
     const paymentMethod = formData.get("paymentMethod");
 
     const res = await fetch("/api/contracts", {
@@ -126,7 +135,9 @@ export default function NewContractPage() {
         odometerStart: odometerStart ? Number(odometerStart) : undefined,
         pricePerDay: Number(pricePerDay),
         excessAmount: excessAmount ? Number(excessAmount) : undefined,
+        depositAmount: depositAmount ? Number(depositAmount) : undefined,
         paymentMethod: paymentMethod || undefined,
+        paymentFrequency,
       }),
     });
 
@@ -259,7 +270,22 @@ export default function NewContractPage() {
         {dateTo && <p className="muted">Datum povrata: {formatDateHr(dateTo)}</p>}
 
         <label>
-          Cijena/dan (EUR)
+          Učestalost naplate
+          <select value={paymentFrequency} onChange={(e) => setPaymentFrequency(e.target.value as typeof paymentFrequency)}>
+            <option value="daily">Dnevno (zadano)</option>
+            <option value="weekly">Tjedno</option>
+            <option value="monthly">Mjesečno</option>
+          </select>
+        </label>
+        {paymentFrequency !== "daily" && (
+          <p className="muted">
+            Cijena ispod predstavlja cijenu PO {paymentFrequency === "weekly" ? "TJEDNU" : "MJESECU"}, ne po danu.
+            Periodi naplate za &quot;Najmovi&quot; stranicu generirat će se automatski za cijelo trajanje ugovora.
+          </p>
+        )}
+
+        <label>
+          {priceFieldLabel}
           <input
             type="number"
             min={0.01}
@@ -285,6 +311,10 @@ export default function NewContractPage() {
         <label>
           Učešće u šteti (EUR)
           <input name="excessAmount" type="number" min={0} step="0.01" />
+        </label>
+        <label>
+          Depozit / učešće (EUR)
+          <input name="depositAmount" type="number" min={0} step="0.01" />
         </label>
         <label>
           Način plaćanja

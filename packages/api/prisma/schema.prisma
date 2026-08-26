@@ -405,6 +405,17 @@ enum ContractStatus {
   expired
 }
 
+// "daily" = postojeće ponašanje (bez RentPayment generacije, isto kao prije
+// ovog polja). weekly/monthly - Contract.pricePerDay tada predstavlja cijenu
+// PO PERIODU (ne po danu, unatoč imenu polja - ime nije mijenjano da se ne
+// dira PDF/ostatak koda koji ga koristi), i createRentPaymentsForContract
+// (server/rentPayments.ts) generira RentPayment retke unaprijed.
+enum PaymentFrequency {
+  daily
+  weekly
+  monthly
+}
+
 model Contract {
   id     String @id @default(cuid())
   // Sekvencijalni broj ugovora, čitljiv za owner/klijenta (za razliku od
@@ -463,6 +474,18 @@ model Contract {
   pricePerDay    Float?
   excessAmount   Float?
   paymentMethod  String?
+  // Učešće/depozit (participacija) - odvojeno od excessAmount ("Učešće u
+  // šteti" = franšiza/osigurateljni izraz, potpuno drugo značenje). Korisnik
+  // je eksplicitno tražio "učešće (depozit/participacija)" kao NOVO polje -
+  // provjereno da excessAmount nije to isto prije dodavanja.
+  depositAmount Float?
+
+  // Učestalost naplate - "daily" ne mijenja ništa postojeće (nema RentPayment
+  // redaka). weekly/monthly generiraju RentPayment raspored unaprijed pri
+  // kreiranju ugovora (vidi createRentPaymentsForContract, server/
+  // rentPayments.ts) - pricePerDay tada predstavlja cijenu PO PERIODU.
+  paymentFrequency PaymentFrequency @default(daily)
+  rentPayments     RentPayment[]
 
   // Prihvaćanje uvjeta najma (scroll-to-accept korak u signing wizardu,
   // prije potpisa). termsAcceptedAt postavlja SERVER u trenutku obrade
@@ -492,6 +515,45 @@ model Contract {
   @@index([vehicleId])
   @@index([status])
   @@map("contracts")
+}
+
+// ---------------------------------------------------------------------------
+// RentPayment (praćenje plaćanja najma - tjedne/mjesečne rate)
+// ---------------------------------------------------------------------------
+
+// Jedan period naplate za weekly/monthly ugovor (vidi Contract.paymentFrequency).
+// Generira ih createRentPaymentsForContract pri kreiranju ugovora, i
+// extendRentPaymentsForContract pri produženju (Annex) - server/
+// rentPayments.ts. Ne postoje redci za "daily" ugovore.
+model RentPayment {
+  id         String   @id @default(cuid())
+  contractId String
+  contract   Contract @relation(fields: [contractId], references: [id], onDelete: Cascade)
+
+  periodStart DateTime
+  periodEnd   DateTime
+  amount      Float
+  // Datum dospijeća - jednak periodStart (naplata na početku perioda, isti
+  // obrazac kao tjedni/mjesečni najam gotovinski plaćajućih klijenata,
+  // npr. taxi). Zasebno polje (ne izvedeno iz periodStart) da bude jasno
+  // razdvojeno značenje i da bude prilagodljivo za buduće ručne izmjene.
+  dueDate     DateTime
+
+  paid   Boolean   @default(false)
+  paidAt DateTime?
+
+  // Dedupe polja - isti obrazac kao *SentAt/*NotifiedAt svugdje drugdje u
+  // ovoj shemi (registrationReminder*SentAt, incompleteDataNotifiedAt) -
+  // svaka notifikacija ide najviše jednom po retku.
+  ownerDueNotifiedAt      DateTime?
+  clientOverdueNotifiedAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([contractId])
+  @@index([dueDate])
+  @@map("rent_payments")
 }
 
 // ---------------------------------------------------------------------------

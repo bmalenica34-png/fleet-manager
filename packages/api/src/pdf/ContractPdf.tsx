@@ -17,7 +17,9 @@ export interface ContractPdfProps {
     odometerEnd: number | null;
     pricePerDay: number | null;
     excessAmount: number | null;
+    depositAmount: number | null;
     paymentMethod: string | null;
+    paymentFrequency: "daily" | "weekly" | "monthly";
     termsAcceptedAt: Date | null;
     termsVersion: string | null;
   };
@@ -65,6 +67,23 @@ function diffDays(from: Date, to: Date): number {
   return Math.max(1, Math.round(ms / (1000 * 60 * 60 * 24)));
 }
 
+// weekly/monthly - pricePerDay je cijena PO PERIODU (ne po danu), pa
+// "Ukupno" mora množiti s brojem PERIODA, ne brojem dana (inače bi izašao
+// apsurdno velik iznos). Isti "monthly=30 dana" pojednostavljeni pristup
+// kao generateRentPaymentPeriods (server/rentPayments.ts) - broj perioda za
+// prikaz na PDF-u mora se slagati s brojem stvarno generiranih redaka.
+const PERIOD_DAYS: Record<"weekly" | "monthly", number> = { weekly: 7, monthly: 30 };
+const PRICE_LABEL: Record<ContractPdfProps["contract"]["paymentFrequency"], string> = {
+  daily: "Cijena/dan",
+  weekly: "Cijena/tjedan",
+  monthly: "Cijena/mjesec",
+};
+
+function periodMultiplier(frequency: ContractPdfProps["contract"]["paymentFrequency"], days: number): number {
+  if (frequency === "daily") return days;
+  return Math.ceil(days / PERIOD_DAYS[frequency]);
+}
+
 export function ContractPdfDocument({
   contract,
   vehicle,
@@ -74,7 +93,10 @@ export function ContractPdfDocument({
   signatureUrl,
 }: ContractPdfProps) {
   const days = diffDays(contract.dateFrom, contract.dateTo);
-  const total = contract.pricePerDay != null ? contract.pricePerDay * days : null;
+  const total =
+    contract.pricePerDay != null
+      ? contract.pricePerDay * periodMultiplier(contract.paymentFrequency, days)
+      : null;
   const base = total != null ? total / (1 + VAT_RATE) : null;
   const vat = total != null && base != null ? total - base : null;
 
@@ -165,7 +187,7 @@ export function ContractPdfDocument({
             <Text style={styles.value}>{days}</Text>
           </View>
           <View style={styles.row}>
-            <Text style={styles.label}>Cijena/dan</Text>
+            <Text style={styles.label}>{PRICE_LABEL[contract.paymentFrequency]}</Text>
             <Text style={styles.value}>{contract.pricePerDay != null ? formatMoney(contract.pricePerDay) : "—"}</Text>
           </View>
           <View style={styles.row}>
@@ -192,6 +214,12 @@ export function ContractPdfDocument({
             <Text style={styles.label}>Učešće u šteti</Text>
             <Text style={styles.value}>
               {contract.excessAmount != null ? formatMoney(contract.excessAmount) : "—"}
+            </Text>
+          </View>
+          <View style={styles.row}>
+            <Text style={styles.label}>Depozit / učešće</Text>
+            <Text style={styles.value}>
+              {contract.depositAmount != null ? formatMoney(contract.depositAmount) : "—"}
             </Text>
           </View>
           <View style={styles.row}>

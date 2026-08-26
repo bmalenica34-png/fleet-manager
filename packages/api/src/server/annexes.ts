@@ -4,6 +4,7 @@ import { generateSigningToken, verifySigningToken } from "../lib/signing-token";
 import { sendAnnexSigningEmail, sendSignedAnnexEmail } from "../lib/email";
 import { buildObjectKey, getPresignedDownloadUrl, uploadObject } from "../storage/hetzner";
 import { renderAnnexPdf } from "../pdf/generate";
+import { extendRentPaymentsForContract } from "./rentPayments";
 
 function getExtendBaseUrl(): string {
   const base = process.env.NEXT_PUBLIC_CLIENT_SIGNING_BASE_URL;
@@ -139,6 +140,11 @@ export async function completeAnnexSigning(
       data: { dateTo: input.newDateTo },
     }),
   ]);
+
+  // Generira RentPayment periode SAMO za produljeni dio (no-op za "daily")
+  // - vidi server/rentPayments.ts. contract.dateTo je ovdje i dalje STARA
+  // vrijednost (annex.parentContract je dohvaćen prije gornjeg update-a).
+  await extendRentPaymentsForContract(contract, contract.dateTo, input.newDateTo);
 
   try {
     const signatureKey = buildObjectKey(`annexes/${annex.id}/signature`, "signature.png");
