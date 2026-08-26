@@ -199,7 +199,8 @@ export default function VehicleDetail() {
   const [serviceRecordsLoading, setServiceRecordsLoading] = useState(true);
   const [serviceDateHr, setServiceDateHr] = useState("");
   const [serviceDescription, setServiceDescription] = useState("");
-  const [serviceCost, setServiceCost] = useState("");
+  const [servicePartsCost, setServicePartsCost] = useState("0");
+  const [serviceLaborCost, setServiceLaborCost] = useState("0");
   const [serviceProvider, setServiceProvider] = useState("");
   const [serviceReceiptFile, setServiceReceiptFile] = useState<PickedFile | null>(null);
   const [serviceMarkUnderService, setServiceMarkUnderService] = useState(false);
@@ -296,7 +297,7 @@ export default function VehicleDetail() {
     loadServiceRecords();
   }, [loadServiceRecords]);
 
-  const totalServiceCost = serviceRecords.reduce((sum, r) => sum + r.cost, 0);
+  const totalServiceCost = serviceRecords.reduce((sum, r) => sum + r.total, 0);
 
   const loadVehicleCosts = useCallback(() => {
     listVehicleCosts(id)
@@ -411,13 +412,14 @@ export default function VehicleDetail() {
     setServiceRecordError(null);
 
     const isoDate = parseHrDateToIso(serviceDateHr.trim());
-    const cost = Number(serviceCost);
+    const partsCost = Number(servicePartsCost || "0");
+    const laborCost = Number(serviceLaborCost || "0");
     if (!isoDate) {
       setServiceRecordError("Datum mora biti u formatu DD.MM.GGGG.");
       return;
     }
-    if (!serviceDescription.trim() || !serviceCost || Number.isNaN(cost)) {
-      setServiceRecordError("Popuni datum, opis i trošak.");
+    if (!serviceDescription.trim() || Number.isNaN(partsCost) || Number.isNaN(laborCost)) {
+      setServiceRecordError("Popuni datum i razlog.");
       return;
     }
 
@@ -426,7 +428,8 @@ export default function VehicleDetail() {
       const input = {
         date: isoDate,
         description: serviceDescription.trim(),
-        cost,
+        partsCost,
+        laborCost,
         provider: serviceProvider.trim() || undefined,
       };
 
@@ -446,7 +449,8 @@ export default function VehicleDetail() {
 
       setServiceDateHr("");
       setServiceDescription("");
-      setServiceCost("");
+      setServicePartsCost("0");
+      setServiceLaborCost("0");
       setServiceProvider("");
       setServiceReceiptFile(null);
       setServiceMarkUnderService(false);
@@ -1130,7 +1134,7 @@ export default function VehicleDetail() {
       {activeTab === "service" && (
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>
-            Ukupan trošak servisa: {totalServiceCost.toFixed(2)} €
+            Ukupno uloženo u vozilo: {totalServiceCost.toFixed(2)} €
           </Text>
 
           <Text style={[styles.sectionTitle, { marginTop: 12 }]}>Nova intervencija</Text>
@@ -1141,15 +1145,21 @@ export default function VehicleDetail() {
             placeholder="24.08.2026."
           />
           <Field
-            label="Opis intervencije"
+            label="Razlog"
             value={serviceDescription}
             onChangeText={setServiceDescription}
             placeholder="npr. Zamjena ulja i filtera"
           />
           <Field
-            label="Trošak (EUR)"
-            value={serviceCost}
-            onChangeText={setServiceCost}
+            label="Cijena dijelova (EUR)"
+            value={servicePartsCost}
+            onChangeText={setServicePartsCost}
+            keyboardType="number-pad"
+          />
+          <Field
+            label="Cijena rada (EUR)"
+            value={serviceLaborCost}
+            onChangeText={setServiceLaborCost}
             keyboardType="number-pad"
           />
           <Field
@@ -1198,9 +1208,12 @@ export default function VehicleDetail() {
               {serviceRecords.map((r) => (
                 <View key={r.id} style={styles.contractCard}>
                   <Text style={styles.contractCardTitle}>
-                    {formatDateHr(r.date)} · {r.cost.toFixed(2)} €
+                    {formatDateHr(r.date)} · {r.description}
                   </Text>
-                  <Text style={styles.muted}>{r.description}</Text>
+                  <Text style={styles.muted}>
+                    Dijelovi: {r.partsCost != null ? `${r.partsCost.toFixed(2)} €` : "—"} · Rad:{" "}
+                    {r.laborCost != null ? `${r.laborCost.toFixed(2)} €` : "—"} · Ukupno: {r.total.toFixed(2)} €
+                  </Text>
                   {r.provider && <Text style={styles.muted}>{r.provider}</Text>}
                   {r.receiptUrl && (
                     <Pressable onPress={() => Linking.openURL(r.receiptUrl!)}>

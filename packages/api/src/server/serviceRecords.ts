@@ -8,10 +8,34 @@ export interface ServiceRecordDTO {
   vehicleId: string;
   date: Date;
   description: string;
-  cost: number;
+  partsCost: number | null;
+  laborCost: number | null;
+  total: number;
   provider: string | null;
   receiptUrl: string | null;
   createdAt: Date;
+}
+
+/**
+ * Total trošak jednog servisnog zapisa - partsCost+laborCost za nove
+ * zapise, FALLBACK na legacy `cost` polje za stare zapise (nastale prije
+ * parts/labor splita, koji imaju partsCost/laborCost = null). Provjerava
+ * partsCost ILI laborCost postavljen (ne oba) da razlikuje "novi zapis s
+ * jednim od dva polja = 0" od "stari zapis, oba null" - novi zapis uvijek
+ * šalje oba polja (vidi serviceRecordCreateSchema), pa je "barem jedno
+ * nije null" pouzdan signal da je ovo novi zapis. Export-an jer ga i
+ * vehicleStats.ts koristi za period-agregirane brojke (dashboard/per-
+ * vehicle profitabilnost/periodični izvještaj).
+ */
+export function serviceRecordTotal(record: {
+  cost: number | null;
+  partsCost: number | null;
+  laborCost: number | null;
+}): number {
+  if (record.partsCost != null || record.laborCost != null) {
+    return (record.partsCost ?? 0) + (record.laborCost ?? 0);
+  }
+  return record.cost ?? 0;
 }
 
 async function toServiceRecordDTO(record: ServiceRecord): Promise<ServiceRecordDTO> {
@@ -20,7 +44,9 @@ async function toServiceRecordDTO(record: ServiceRecord): Promise<ServiceRecordD
     vehicleId: record.vehicleId,
     date: record.date,
     description: record.description,
-    cost: record.cost,
+    partsCost: record.partsCost,
+    laborCost: record.laborCost,
+    total: serviceRecordTotal(record),
     provider: record.provider,
     receiptUrl: record.receiptKey ? await getPresignedDownloadUrl(record.receiptKey) : null,
     createdAt: record.createdAt,

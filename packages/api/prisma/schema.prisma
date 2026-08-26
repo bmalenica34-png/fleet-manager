@@ -88,8 +88,15 @@ model ServiceRecord {
   vehicleId   String
   vehicle     Vehicle  @relation(fields: [vehicleId], references: [id], onDelete: Cascade)
   date        DateTime
-  description String
-  cost        Float
+  description String   // koristi se kao "Razlog" u UI-u - polje je već postojalo, nije dupliciran novi
+  // LEGACY - jedinstveno "trošak" polje prije parts/labor splita. Nikad se
+  // više ne piše za nove zapise (uvijek null na njima), ALI se zadržava na
+  // starim zapisima radi povijesti - serviceRecordTotal() u server/
+  // serviceRecords.ts računa total kao partsCost+laborCost kad su ta dva
+  // polja postavljena, INAČE fallback na ovo polje (stari zapis).
+  cost        Float?
+  partsCost   Float?
+  laborCost   Float?
   provider    String?
   receiptKey  String? // račun/dokument (S3 key na Hetzneru, ne raw URL)
 

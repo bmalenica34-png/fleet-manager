@@ -162,7 +162,8 @@ export default function VehicleDetailPage() {
   const [serviceRecordsLoading, setServiceRecordsLoading] = useState(true);
   const [serviceDate, setServiceDate] = useState("");
   const [serviceDescription, setServiceDescription] = useState("");
-  const [serviceCost, setServiceCost] = useState("");
+  const [servicePartsCost, setServicePartsCost] = useState("0");
+  const [serviceLaborCost, setServiceLaborCost] = useState("0");
   const [serviceProvider, setServiceProvider] = useState("");
   const [serviceReceiptFile, setServiceReceiptFile] = useState<File | null>(null);
   const [serviceMarkUnderService, setServiceMarkUnderService] = useState(false);
@@ -280,7 +281,7 @@ export default function VehicleDetailPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [vehicleId]);
 
-  const totalServiceCost = serviceRecords.reduce((sum, r) => sum + r.cost, 0);
+  const totalServiceCost = serviceRecords.reduce((sum, r) => sum + r.total, 0);
 
   function loadVehicleCosts() {
     setVehicleCostsLoading(true);
@@ -413,8 +414,8 @@ export default function VehicleDetailPage() {
     event.preventDefault();
     setServiceRecordError(null);
 
-    if (!serviceDate || !serviceDescription.trim() || !serviceCost) {
-      setServiceRecordError("Popuni datum, opis i trošak.");
+    if (!serviceDate || !serviceDescription.trim()) {
+      setServiceRecordError("Popuni datum i razlog.");
       return;
     }
 
@@ -423,7 +424,8 @@ export default function VehicleDetailPage() {
     const formData = new FormData();
     formData.append("date", serviceDate);
     formData.append("description", serviceDescription.trim());
-    formData.append("cost", serviceCost);
+    formData.append("partsCost", servicePartsCost || "0");
+    formData.append("laborCost", serviceLaborCost || "0");
     if (serviceProvider.trim()) formData.append("provider", serviceProvider.trim());
     if (serviceReceiptFile) formData.append("receipt", serviceReceiptFile);
 
@@ -453,7 +455,8 @@ export default function VehicleDetailPage() {
     setSavingServiceRecord(false);
     setServiceDate("");
     setServiceDescription("");
-    setServiceCost("");
+    setServicePartsCost("0");
+    setServiceLaborCost("0");
     setServiceProvider("");
     setServiceReceiptFile(null);
     setServiceMarkUnderService(false);
@@ -1155,7 +1158,7 @@ export default function VehicleDetailPage() {
       {activeTab === "service" && (
         <div style={{ marginTop: "2rem" }}>
           <p>
-            <strong>Ukupan trošak servisa: {totalServiceCost.toFixed(2)} €</strong>
+            <strong>Ukupno uloženo u vozilo: {totalServiceCost.toFixed(2)} €</strong>
           </p>
 
           <h2 style={{ marginTop: "1.5rem" }}>Nova intervencija</h2>
@@ -1170,7 +1173,7 @@ export default function VehicleDetailPage() {
               />
             </label>
             <label>
-              Opis intervencije
+              Razlog
               <input
                 value={serviceDescription}
                 onChange={(e) => setServiceDescription(e.target.value)}
@@ -1179,14 +1182,23 @@ export default function VehicleDetailPage() {
               />
             </label>
             <label>
-              Trošak (EUR)
+              Cijena dijelova (EUR)
               <input
                 type="number"
                 min={0}
                 step="0.01"
-                value={serviceCost}
-                onChange={(e) => setServiceCost(e.target.value)}
-                required
+                value={servicePartsCost}
+                onChange={(e) => setServicePartsCost(e.target.value)}
+              />
+            </label>
+            <label>
+              Cijena rada (EUR)
+              <input
+                type="number"
+                min={0}
+                step="0.01"
+                value={serviceLaborCost}
+                onChange={(e) => setServiceLaborCost(e.target.value)}
               />
             </label>
             <label>
@@ -1234,8 +1246,10 @@ export default function VehicleDetailPage() {
               <thead>
                 <tr>
                   <th>Datum</th>
-                  <th>Opis</th>
-                  <th>Trošak</th>
+                  <th>Razlog</th>
+                  <th>Dijelovi</th>
+                  <th>Rad</th>
+                  <th>Ukupno</th>
                   <th>Servis</th>
                   <th>Račun</th>
                   <th />
@@ -1246,7 +1260,9 @@ export default function VehicleDetailPage() {
                   <tr key={r.id}>
                     <td>{formatDateHr(r.date)}</td>
                     <td>{r.description}</td>
-                    <td>{r.cost.toFixed(2)} €</td>
+                    <td>{r.partsCost != null ? `${r.partsCost.toFixed(2)} €` : <span className="muted">—</span>}</td>
+                    <td>{r.laborCost != null ? `${r.laborCost.toFixed(2)} €` : <span className="muted">—</span>}</td>
+                    <td>{r.total.toFixed(2)} €</td>
                     <td>{r.provider ?? <span className="muted">—</span>}</td>
                     <td>
                       {r.receiptUrl ? (

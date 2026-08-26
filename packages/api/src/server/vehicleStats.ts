@@ -1,5 +1,6 @@
 import { prisma } from "../db/client";
 import { calculateProRatedVehicleCosts } from "./vehicleCosts";
+import { serviceRecordTotal } from "./serviceRecords";
 
 function startOfDay(date: Date): Date {
   const d = new Date(date);
@@ -86,7 +87,7 @@ export async function getVehicleStats(
     }),
     prisma.serviceRecord.findMany({
       where: { vehicleId, date: { gte: from, lte: to } },
-      select: { cost: true },
+      select: { cost: true, partsCost: true, laborCost: true },
     }),
     prisma.vehicleCost.findMany({
       where: { vehicleId },
@@ -111,7 +112,7 @@ export async function getVehicleStats(
     }
   }
 
-  const serviceCost = serviceRecords.reduce((sum, r) => sum + r.cost, 0);
+  const serviceCost = serviceRecords.reduce((sum, r) => sum + serviceRecordTotal(r), 0);
   const additionalCosts = calculateProRatedVehicleCosts(vehicleCosts, from, to);
   const totalDays = daysBetweenInclusive(from, to);
   const rentedDays = Math.min(rentedDaySet.size, totalDays);

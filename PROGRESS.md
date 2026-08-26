@@ -4,6 +4,70 @@ Dinamički log stanja projekta. Ažurira se na kraju svake sesije. Za statičnu
 arhitekturu/konvencije vidi [CLAUDE.md](CLAUDE.md) — ovaj dokument je "što je
 gotovo i zašto", ne "kako treba izgledati".
 
+**Zadnje ažurirano:** 2026-08-26, tridesettreći nastavak - servisna knjižica
+(`ServiceRecord`) proširena: trošak razdvojen na dijelove+rad, uz legacy
+fallback za stare zapise, provučeno kroz cijeli statistički lanac.
+
+**1) Shema.** `ServiceRecord.cost` postao `Float?` (LEGACY - nikad se više ne
+piše za nove zapise, ostaje na starim retcima radi povijesti). Dodana dva
+nova nullable polja `partsCost`/`laborCost`. `description` NIJE preimenovano
+niti duplicirano - već je postojalo i semantički pokriva "razlog", samo
+relabelano u UI-u (isti pristup kao `Client.address`/`driverLicenseKey`
+presedan iz ranijih nastavaka - ne dodavati polje ako postojeće već znači
+isto). Migracija `20260826150000_split_service_record_cost` - ručno
+napisana (isti razlog kao sve ostale), primijenjena **uz eksplicitnu
+potvrdu korisnika prije pokretanja** (novo pravilo, vidi CLAUDE.md - prvi put
+formalno primijenjeno).
+
+**2) `serviceRecordTotal()` helper** (`server/serviceRecords.ts`, exportan) -
+jedino mjesto koje zna fallback logiku: `partsCost ?? 0 + laborCost ?? 0`
+AKO je barem jedno od ta dva postavljeno (signal "ovo je novi zapis" - novi
+zapisi UVIJEK šalju oba polja, čak i kad je jedno 0, vidi
+`serviceRecordCreateSchema`), INAČE `cost ?? 0` (stari zapis). `ServiceRecordDTO`
+sad izlaže `partsCost`/`laborCost` (mogu biti `null` na starim zapisima) +
+`total` (uvijek popunjen) - `cost` polje NIJE izloženo na DTO-u, frontend
+nikad ne radi fallback matematiku sam.
+
+**3) Provlačenje kroz statistiku.** `vehicleStats.ts` (`getVehicleStats`) -
+select prošireno na `cost, partsCost, laborCost`, `serviceCost` agregacija
+sad ide kroz `serviceRecordTotal()` umjesto direktno `r.cost`. Sve što se
+na to naslanja (`statsTimeSeries.ts`, `periodicReports.ts`, dashboard graf,
+`/vehicles/stats`, PDF izvještaj) NIJE trebalo dirati - svi konzumiraju već
+agregiran `serviceCost` iz `getVehicleStats`/`getFleetStats`, popravljeno na
+jednom mjestu.
+
+**4) UI - web (`/vehicles/[id]`, "Servisna knjižica" tab).** Forma: "Trošak"
+zamijenjen s "Cijena dijelova"/"Cijena rada" (oba opcionalna, defaultiraju
+na "0" - prazan string se coerce-a u 0 kroz Zod, provjereno). "Opis
+intervencije" label promijenjen u "Razlog" (isto polje, `serviceDescription`
+state nije preimenovan). Tablica dobila stupce Dijelovi/Rad/Ukupno (stari
+zapisi bez splita prikazuju "—" za dijelove/rad, ali ukupno je uvijek
+popunjeno preko `total`). Vrh sekcije preimenovan u "Ukupno uloženo u
+vozilo" (cijeli životni vijek zapisa za to vozilo, ne ograničeno na
+period - `serviceRecords.reduce` preko svih učitanih zapisa).
+
+**5) UI - mobile.** Isti state/forma split (`servicePartsCost`/
+`serviceLaborCost`, oba default "0"), isti "Razlog" label, isti "Ukupno
+uloženo u vozilo" naslov. Popis zapisa NIJE doslovna HTML tablica (RN nema
+tu mogućnost) - isti postojeći `contractCard` stil kao ostatak fajla, samo
+proširen prikazom "Dijelovi: X € · Rad: Y € · Ukupno: Z €" u retku (native
+UI ekvivalent, ne WebView - vidi CLAUDE.md mobile paritet pravilo).
+
+**Verifikacija.** `tsc --noEmit` čisto na sva tri paketa, `next build`
+prošao. `prisma generate` pokrenut i prije i nakon `migrate deploy` (prije -
+da typecheck vidi nova polja bez diranja baze; poslije - da client odgovara
+stvarnoj shemi). End-to-end test **izravno protiv produkcijske baze**
+(scratch `.ts` + `npx tsx`, isti obrazac kao prošli nastavak): (1) novi
+zapis dijelovi=100/rad=50 → `total` 150 potvrđen, (2) legacy red kreiran
+izravno kroz Prisma SAMO sa starim `cost`=80 poljem (bez `partsCost`/
+`laborCost`) → DTO `total` ispravno fallback-a na 80, (3) `getVehicleStats`
+za dan koji sadrži oba zapisa → `serviceCost` 230 (100+50+80), točan zbroj.
+Sve tri provjere prošle. Puni login-flow UI test PRESKOČEN (isto poznato
+PKCE ograničenje kao prošli nastavak). Test zapisi i scratch skripta
+obrisani nakon verifikacije, `.env` u `packages/api/` uklonjen.
+
+---
+
 **Zadnje ažurirano:** 2026-08-26, tridesetdrugi nastavak - CSV bulk uvoz
 klijenata, replicira ISTI obrazac kao postojeći CSV uvoz vozila (bug/modul iz
 30. nastavka - `70ca2c4`).

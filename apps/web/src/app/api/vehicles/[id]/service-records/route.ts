@@ -33,7 +33,8 @@ export async function POST(
     vehicleId: params.id,
     date: formData.get("date"),
     description: formData.get("description"),
-    cost: formData.get("cost"),
+    partsCost: formData.get("partsCost"),
+    laborCost: formData.get("laborCost"),
     provider: formData.get("provider") || undefined,
   });
   if (!parsed.success) return zodErrorResponse(parsed.error);

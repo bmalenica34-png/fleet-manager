@@ -451,12 +451,18 @@ export function requestContractPhotos(contractId: string): Promise<unknown> {
 }
 
 // --- Servisna knjižica ---
+// partsCost/laborCost mogu biti null na starim zapisima (prije parts/labor
+// splita) - `total` je uvijek popunjen (backend računa fallback na legacy
+// `cost` polje, vidi serviceRecordTotal u server/serviceRecords.ts), pa ga
+// UI koristi izravno bez ikakve lokalne fallback logike.
 export interface ServiceRecordDTO {
   id: string;
   vehicleId: string;
   date: string;
   description: string;
-  cost: number;
+  partsCost: number | null;
+  laborCost: number | null;
+  total: number;
   provider: string | null;
   receiptUrl: string | null;
   createdAt: string;
@@ -465,7 +471,8 @@ export interface ServiceRecordDTO {
 export interface ServiceRecordCreateInput {
   date: string; // "YYYY-MM-DD"
   description: string;
-  cost: number;
+  partsCost: number;
+  laborCost: number;
   provider?: string;
 }
 
@@ -487,7 +494,8 @@ export function createServiceRecord(
   const formData = new FormData();
   formData.append("date", input.date);
   formData.append("description", input.description);
-  formData.append("cost", String(input.cost));
+  formData.append("partsCost", String(input.partsCost));
+  formData.append("laborCost", String(input.laborCost));
   if (input.provider) formData.append("provider", input.provider);
   return apiFetch(`/api/vehicles/${vehicleId}/service-records`, { method: "POST", body: formData });
 }
@@ -501,7 +509,8 @@ export function createServiceRecordWithReceipt(
   return uploadPickedFile(`/api/vehicles/${vehicleId}/service-records`, receipt, "receipt", {
     date: input.date,
     description: input.description,
-    cost: String(input.cost),
+    partsCost: String(input.partsCost),
+    laborCost: String(input.laborCost),
     ...(input.provider ? { provider: input.provider } : {}),
   });
 }
