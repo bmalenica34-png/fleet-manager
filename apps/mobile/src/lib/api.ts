@@ -315,6 +315,8 @@ export interface ClientRecord {
   oib: string;
   email: string;
   phone: string;
+  hasIncompleteData: boolean;
+  incompleteReasons: string[];
 }
 
 export function listClients(): Promise<ClientRecord[]> {
@@ -334,6 +336,37 @@ export function createClient(input: ClientCreateInput): Promise<ClientRecord> {
     method: "POST",
     body: JSON.stringify(input),
   });
+}
+
+// Isti obrazac kao vehicle CSV import (web) - red se uvijek uveze, samo
+// pravi duplikati (OIB/broj osobne) se preskaču. Vidi
+// packages/api/src/server/clients.ts importClientsFromCsvRows.
+export interface ClientCsvImportedRow {
+  rowNumber: number;
+  clientId: string;
+  firstName: string;
+  lastName: string;
+  oib: string;
+  incomplete: boolean;
+  reasons: string[];
+}
+
+export interface ClientCsvSkippedRow {
+  rowNumber: number;
+  reason: string;
+}
+
+export interface ClientCsvImportResult {
+  importedCount: number;
+  incompleteCount: number;
+  skippedCount: number;
+  imported: ClientCsvImportedRow[];
+  skipped: ClientCsvSkippedRow[];
+}
+
+/** CSV fajl odabran preko expo-document-picker - isti uploadPickedFile put kao ostali fajl uploadi. */
+export function importClientsCsv(file: PickedFile): Promise<ClientCsvImportResult> {
+  return uploadPickedFile("/api/clients/import-csv", file, "file");
 }
 
 // --- Ugovori ---

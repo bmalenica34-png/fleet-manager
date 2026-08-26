@@ -82,6 +82,10 @@ export default function ClientsScreen() {
             <View style={{ width: 60 }} />
           </View>
 
+          <Pressable style={styles.importButton} onPress={() => router.push("/owner/clients/import")}>
+            <Text style={styles.importButtonText}>Uvoz klijenata (CSV)</Text>
+          </Pressable>
+
           {loading ? (
             <ActivityIndicator />
           ) : loadError ? (
@@ -95,11 +99,15 @@ export default function ClientsScreen() {
         <View style={styles.row}>
           <Text style={styles.rowTitle}>
             {item.firstName} {item.lastName}
+            {item.hasIncompleteData ? " ⚠️" : ""}
           </Text>
           <Text style={styles.rowBody}>{item.email}</Text>
           <Text style={styles.rowMuted}>
             OIB {item.oib} · {item.phone}
           </Text>
+          {item.hasIncompleteData && (
+            <Text style={styles.rowMuted}>Nedostaje: {item.incompleteReasons.join(", ")}</Text>
+          )}
         </View>
       )}
       ItemSeparatorComponent={() => <View style={{ height: 8 }} />}
@@ -149,6 +157,14 @@ const styles = StyleSheet.create({
   title: { fontSize: 20, fontWeight: "600" },
   muted: { color: "#888" },
   error: { color: "#c00" },
+  importButton: {
+    borderWidth: 1,
+    borderColor: "#111",
+    padding: 12,
+    borderRadius: 8,
+    alignItems: "center",
+  },
+  importButtonText: { color: "#111", fontWeight: "600" },
   row: { borderWidth: 1, borderColor: "#ccc", borderRadius: 8, padding: 14, gap: 4 },
   rowTitle: { fontSize: 16, fontWeight: "600" },
   rowBody: { fontSize: 14, color: "#444" },

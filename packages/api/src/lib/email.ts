@@ -88,6 +88,25 @@ export async function sendIncompleteVehicleDataEmail(params: {
   });
 }
 
+export async function sendIncompleteClientDataEmail(params: {
+  to: string;
+  recipientName: string;
+  clientLabel: string;
+  reasons: string[];
+}): Promise<void> {
+  await sendEmail({
+    to: params.to,
+    subject: `Klijent ${params.clientLabel} ima nepotpune podatke`,
+    html: `
+      <p>Poštovani/a ${params.recipientName},</p>
+      <p>Klijent <strong>${params.clientLabel}</strong> je uvezen s nepotpunim podacima:</p>
+      <ul>${params.reasons.map((r) => `<li>${r}</li>`).join("")}</ul>
+      <p>Molimo dopuni podatke na stranici klijenta.</p>
+      <p>Hvala,<br/>Rent-a-Car Manager</p>
+    `,
+  });
+}
+
 export async function sendContractSigningEmail(params: {
   to: string;
   clientName: string;

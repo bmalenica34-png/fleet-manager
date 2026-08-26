@@ -64,7 +64,12 @@ export default function ClientsPage() {
 
   return (
     <div>
-      <h1>Klijenti</h1>
+      <div className="toolbar">
+        <h1>Klijenti</h1>
+        <a className="btn" href="/clients/import">
+          Uvoz klijenata (CSV)
+        </a>
+      </div>
 
       <input
         type="search"
@@ -95,6 +100,11 @@ export default function ClientsPage() {
                   <a href={`/clients/${c.id}`}>
                     {c.firstName} {c.lastName}
                   </a>
+                  {c.hasIncompleteData && (
+                    <span title={`Nedostaje: ${c.incompleteReasons.join(", ")}`} style={{ marginLeft: "0.4rem" }}>
+                      ⚠️
+                    </span>
+                  )}
                 </td>
                 <td>{c.oib}</td>
                 <td>{c.email}</td>

@@ -120,6 +120,21 @@ export default function ClientDetailPage() {
         {client.firstName} {client.lastName}
       </h1>
 
+      {client.hasIncompleteData && (
+        <div
+          style={{
+            padding: "0.75rem 1rem",
+            marginBottom: "1rem",
+            border: "1px solid #d97706",
+            borderRadius: "6px",
+            background: "#fffbeb",
+            color: "#92400e",
+          }}
+        >
+          ⚠️ <strong>Nepotpuni podaci</strong> (vjerojatno uvezeno preko CSV-a): {client.incompleteReasons.join(", ")}
+        </div>
+      )}
+
       <div style={{ marginBottom: "1rem" }}>
         <p style={{ margin: "0.2rem 0" }}>
           <span className="muted">OIB: </span>
@@ -137,6 +152,24 @@ export default function ClientDetailPage() {
           <p style={{ margin: "0.2rem 0" }}>
             <span className="muted">Adresa: </span>
             {client.address}
+          </p>
+        )}
+        {client.idNumber && (
+          <p style={{ margin: "0.2rem 0" }}>
+            <span className="muted">Broj osobne: </span>
+            {client.idNumber}
+          </p>
+        )}
+        {client.driverLicenseNumber && (
+          <p style={{ margin: "0.2rem 0" }}>
+            <span className="muted">Broj vozačke: </span>
+            {client.driverLicenseNumber}
+          </p>
+        )}
+        {client.birthDate && (
+          <p style={{ margin: "0.2rem 0" }}>
+            <span className="muted">Datum rođenja: </span>
+            {formatDateHr(client.birthDate)}
           </p>
         )}
       </div>

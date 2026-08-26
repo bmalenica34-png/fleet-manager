@@ -12,6 +12,9 @@ export const clientCreateSchema = z.object({
   email: z.string().email().toLowerCase(),
   phone: z.string().min(1),
   address: z.string().min(1).optional(),
+  idNumber: z.string().min(1).optional(),
+  driverLicenseNumber: z.string().min(1).optional(),
+  birthDate: z.coerce.date().optional(),
   driverLicenseKey: z.string().min(1).optional(),
   idDocumentKey: z.string().min(1).optional(),
 });

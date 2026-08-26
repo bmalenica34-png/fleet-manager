@@ -1,5 +1,9 @@
 import { prisma } from "../db/client";
-import { sendIncompleteVehicleDataEmail, sendRegistrationExpiryEmail } from "../lib/email";
+import {
+  sendIncompleteClientDataEmail,
+  sendIncompleteVehicleDataEmail,
+  sendRegistrationExpiryEmail,
+} from "../lib/email";
 
 const MILESTONES = [
   { days: 7, field: "registrationReminder7SentAt" as const },
@@ -151,4 +155,45 @@ export async function runIncompleteVehicleDataCheck(): Promise<IncompleteDataChe
   }
 
   return { checked: vehicles.length, notificationsSent, errors };
+}
+
+export interface IncompleteClientDataCheckResult {
+  checked: number;
+  notificationsSent: { clientId: string }[];
+  errors: { clientId: string; error: string }[];
+}
+
+/**
+ * Isti dedupe obrazac kao runIncompleteVehicleDataCheck (jedan sent-at
+ * timestamp, notifikacija ide najviše jednom po klijentu - čak i ako se
+ * incompleteReasons kasnije promijene). Samo owner, isto obrazloženje kao
+ * vozila.
+ */
+export async function runIncompleteClientDataCheck(): Promise<IncompleteClientDataCheckResult> {
+  const notificationsSent: IncompleteClientDataCheckResult["notificationsSent"] = [];
+  const errors: IncompleteClientDataCheckResult["errors"] = [];
+
+  const clients = await prisma.client.findMany({
+    where: { hasIncompleteData: true, incompleteDataNotifiedAt: null },
+  });
+
+  for (const client of clients) {
+    try {
+      await sendIncompleteClientDataEmail({
+        to: getOwnerEmail(),
+        recipientName: "Owner",
+        clientLabel: `${client.firstName} ${client.lastName} (OIB ${client.oib})`,
+        reasons: client.incompleteReasons,
+      });
+      await prisma.client.update({
+        where: { id: client.id },
+        data: { incompleteDataNotifiedAt: new Date() },
+      });
+      notificationsSent.push({ clientId: client.id });
+    } catch (err) {
+      errors.push({ clientId: client.id, error: err instanceof Error ? err.message : String(err) });
+    }
+  }
+
+  return { checked: clients.length, notificationsSent, errors };
 }

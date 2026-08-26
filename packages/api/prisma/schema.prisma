@@ -351,6 +351,25 @@ model Client {
   driverLicenseFrontKey  String?
   driverLicenseBackKey   String?
 
+  // Tekstualna polja - popunjena ručno ili preko CSV bulk uvoza (vidi
+  // importClientsFromCsvRows u server/clients.ts). Odvojeno od gornjih
+  // *Key polja (skenirane slike dokumenata) - ovo su brojevi ISPISANI na
+  // dokumentu, ne sami dokumenti. idNumber je @unique (isti obrazac kao
+  // Vehicle.vin) - pravi duplikat "broj osobne" preko dva klijenta se time
+  // hvata i na DB razini, ne samo app-level provjerom u CSV importu.
+  idNumber              String?  @unique
+  driverLicenseNumber   String?
+  birthDate             DateTime?
+
+  // CSV bulk uvoz klijenata - isti obrazac kao Vehicle.hasIncompleteData/
+  // incompleteReasons/incompleteDataNotifiedAt (vidi migraciju
+  // 20260824210000_add_vehicle_incomplete_data_tracking). Red se uvijek
+  // uveze čak i s nedostajućim/lošim poljima (osim pravih duplikata OIB-a/
+  // broja osobne) - ovo bilježi ŠTO nedostaje za naknadnu dopunu.
+  hasIncompleteData Boolean  @default(false)
+  incompleteReasons String[] @default([])
+  incompleteDataNotifiedAt DateTime?
+
   // Poveže se s Supabase auth accountom kad se klijent registrira/potvrdi.
   // Nullable jer klijent može kompletirati cijeli signing flow bez accounta.
   userId            String?  @unique

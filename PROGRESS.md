@@ -4,6 +4,76 @@ Dinamički log stanja projekta. Ažurira se na kraju svake sesije. Za statičnu
 arhitekturu/konvencije vidi [CLAUDE.md](CLAUDE.md) — ovaj dokument je "što je
 gotovo i zašto", ne "kako treba izgledati".
 
+**Zadnje ažurirano:** 2026-08-26, tridesetdrugi nastavak - CSV bulk uvoz
+klijenata, replicira ISTI obrazac kao postojeći CSV uvoz vozila (bug/modul iz
+30. nastavka - `70ca2c4`).
+
+**1) Shema - novi Client tekstualna polja + kompletnost tracking.**
+`idNumber` (broj osobne, `@unique` - isti obrazac kao `Vehicle.vin`),
+`driverLicenseNumber`, `birthDate` - sva tri nullable, popunjena ručno kroz
+CSV ili ostaju null. `hasIncompleteData`/`incompleteReasons`/
+`incompleteDataNotifiedAt` - identičan obrazac kao `Vehicle` (migracija
+`20260824210000_add_vehicle_incomplete_data_tracking`), samo za Client.
+Ručno napisana migracija (`20260826120000_add_client_csv_import_fields`) -
+isti razlog kao svih prijašnjih (shadow-DB replay pada), `migrate deploy`
+izravno na produkcijsku bazu - primijenjeno i verificirano.
+
+**2) `importClientsFromCsvRows`** (`server/clients.ts`) - kopija
+`importVehiclesFromCsvRows` strukture. OIB je jedino "hard stop" polje
+(prazan → preskoči red, isti razlog kao registarska tablica kod vozila -
+NOT NULL+UNIQUE, nema smislenog placeholdera). Pravi duplikati (OIB ILI
+broj osobne već postoje na drugom klijentu, case-insensitive, provjereno i
+unutar istog CSV-a preko `Set`) se preskaču. Sve ostalo nedostajuće
+(ime/prezime/email/telefon/adresa/broj vozačke/datum rođenja) ili loše
+formatirano (datum rođenja preko `parseHrDateToIso`) NE blokira uvoz -
+klijent se uveze s placeholder vrijednostima gdje treba (NOT NULL polja) i
+flagira u `incompleteReasons`. CSV uvoz namjerno NE dira dokumente (osobna/
+vozačka slike) - postojeći `missingSlots` prikaz na `/clients/[id]`
+(client-side, iz `CLIENT_DOCUMENT_SLOTS`) već pokriva tu odvojenu
+kompletnost, nije dupliciran ovdje.
+
+**3) Notifikacijski cron.** `runIncompleteClientDataCheck`
+(`registrationReminders.ts`) - identičan `runIncompleteVehicleDataCheck`
+obrazac (dedupe preko `incompleteDataNotifiedAt`, samo owner mail). Dodan u
+ISTI `/api/cron/check-registrations` request kao vozila (namjerno nema
+novog cron entryja u `vercel.json` - vidi 30. nastavak, Vercel plan limit
+broja cron poslova). Response JSON ključ `incompleteData` preimenovan u
+`incompleteVehicleData` (uz novi `incompleteClientData`) - provjereno da
+nijedan frontend/test to ime ne čita, sigurna promjena.
+
+**4) UI - web.** Nova `/clients/import` stranica (kopija `/vehicles/import`)
++ `/api/clients/import-csv` ruta. `/clients` lista dobila toolbar link +
+⚠️ badge (isti `hasIncompleteData` tooltip obrazac kao `/vehicles`).
+`/clients/[id]` dobio isti nepotpuni-podaci banner kao `/vehicles/[id]`, plus
+prikaz tri nova polja (broj osobne/vozačke/datum rođenja) kad su prisutna.
+
+**5) UI - mobile (owner-mobile).** Nov `owner/clients/import.tsx` ekran
+(CSV preko `expo-document-picker`, upload preko postojećeg
+`uploadPickedFile`/`File.upload()` mehanizma - isti razlog kao ostali
+fajl-uploadi, RN FormData most ne podržava file partove izravno). Napomena:
+vozila NEMAJU mobile CSV-import ekran uopće (nikad nije portan iz 30.
+nastavka) - ovaj zadatak ga nije retroaktivno dodavao za vozila, samo
+implementirao paritet za klijente kako je traženo. `owner/clients/index.tsx`
+dobio nav gumb za import + ⚠️ badge s `incompleteReasons` tekstom.
+
+**Verifikacija.** `tsc --noEmit` čisto na sva tri paketa (api/web/mobile),
+`next build` prošao (nove rute `/clients/import` i `/api/clients/import-csv`
+vidljive u outputu). Puni login-flow UI test PRESKOČEN (poznato PKCE
+ograničenje magic-linka izvan pravog browsera, vidi 6. sekciju i bug #14) -
+umjesto toga `importClientsFromCsvRows` testiran izravno kroz scratch
+`.mjs`-ekvivalent (`npx tsx` + `.env` kopiran u `packages/api/`, isti
+obrazac kao ostale scratch skripte) protiv STVARNE dev baze: 5 test redaka
+(ispravan red, red bez broja osobne, pravi duplikat OIB-a unutar CSV-a, red
+s nedostajućim poljima + neispravnim datumom, prazan red) → točan izvještaj
+(2 uvezena od toga 1 nepotpun, 3 preskočena s točnim razlozima). Usput
+otkriveno (NE bug) - test OIB `11111111111` se poklopio sa stvarnim
+postojećim test klijentom "Proba Prroobba" iz 20.08. sesije, što je
+POTVRDILO da duplicate-check ispravno radi (nije lažni pozitivan nalaz).
+Test klijenti i scratch skripte obrisani nakon verifikacije, `.env` u
+`packages/api/` uklonjen.
+
+---
+
 **Zadnje ažurirano:** 2026-08-25, tridesetprvi nastavak - korisnik zatražio
 proširenje statistike vozila: dodatni troškovi (leasing/osiguranje/kasko/
 ostalo, uklj. pro-rata rate), dashboard na početnoj stranici (web + mobile)
