@@ -4,6 +4,57 @@ Dinamički log stanja projekta. Ažurira se na kraju svake sesije. Za statičnu
 arhitekturu/konvencije vidi [CLAUDE.md](CLAUDE.md) — ovaj dokument je "što je
 gotovo i zašto", ne "kako treba izgledati".
 
+**Zadnje ažurirano:** 2026-08-26, tridesetšesti nastavak - tri prijavljena
+buga iz produkcijskog testiranja prošlog nastavka (payment tracking),
+popravljena dva, treći ispao false positive nakon istrage.
+
+**1) "Najmovi" 'neplaćeno' filter pokazivao SVE buduće periode.** Popravak
+je ISKLJUČIVO client-side - `listRentPayments()` i dalje vraća SVE retke
+(server-side filtriranje bi onemogućilo "Sve" tab da bude puni informativni
+raspored). Umjesto nove "stranica ugovora" (ne postoji per-contract detail
+stranica u appu, ne gradi se samo za ovo - "Sve" tab na POSTOJEĆOJ Najmovi
+stranici već ispunjava tu ulogu, nefiltriran), filter logika u
+`(owner)/najmovi/page.tsx` i `owner/najmovi.tsx` (mobile) promijenjena:
+"Neplaćeno" = `!paid && dueDate <= danas` (bilo samo `!paid`). "Ukupno
+neplaćeno" zbroj na vrhu prati isti kriterij. `dueDate` korišten (ne
+`periodStart` - trenutno identični po dizajnu, ali `dueDate` je
+semantički ispravnije polje za "je li dospjelo"). Verificirano scratch
+testom protiv produkcije: pravi 4-tjedni ugovor → "neplaćeno" filter vraća
+TOČNO 1 (tekući tjedan), "sve" prikaz i dalje vraća sva 4.
+
+**2) T&C PDF nije imao potpis.** `TermsPdfProps` NIJE uopće imao
+`signatureUrl` polje (za razliku od ContractPdf/ProtocolPdf) -
+`finalizeContractDocuments` (server/documents.ts) je već imao gotov
+`signatureUrl` u scope-u (isti presigned URL korišten za druga dva PDF-a),
+samo ga nije proslijedio u `renderTermsPdf()` poziv. Dodan `signatureUrl`
+prop + "Potpis korisnika" blok u `TermsPdf.tsx` (isti stil/`signatureImage`
+kao ostala dva PDF-a), proslijeđen u `documents.ts`. Verificirano
+generiranjem stvarnog test PDF-a (`npx tsx` + `renderTermsPdf` izravno) -
+potpis se vizualno pojavljuje.
+
+**3) "Učešće zamjenjuje ukupnu cijenu" - ISTRAŽENO, NIJE bug.** Iscrpna
+pretraga (svaka referenca na `excessAmount`/`depositAmount`/`pricePerDay`
+u cijelom repou, uklj. sign/extend/request-photos stranice, email
+template-i) nije našla nijedan kod-put koji bi mogao uzrokovati miješanje.
+Generiran i vizualno pregledan test contract PDF s tri različite vrijednosti
+(800/500/200) - sve ispravno odvojeno prikazano. Korisnik potvrdio nakon
+pitanja: testni ugovor ("DEBUG-TERMS-1", 750€ ukupno) je imao **ručno
+upisanih 750€ u "Učešće u šteti" polje** - podudaranje s totalom bilo je
+namjerni odabir testne vrijednosti, ne kod-bug. Nikakva promjena koda nije
+napravljena za ovu točku.
+
+**Verifikacija.** `tsc --noEmit` čisto na sva tri paketa, `next build`
+prošao. Nema schema promjena u ovom nastavku (nije trebala migracija).
+Scratch `.ts` testovi (izravno protiv produkcije, `npx tsx`): (a) pravi
+4-tjedni weekly ugovor kreiran → potvrđeno da "neplaćeno" filter ispravno
+suzuje na 1 tekući period; (b) `renderTermsPdf` pozvan izravno s test
+potpisom → potpis vizualno potvrđen na generiranom PDF-u. Test podaci i
+scratch skripte obrisani nakon verifikacije, `.env` u `packages/api/`
+uklonjen. Puni login-flow UI test PRESKOČEN - isto poznato PKCE
+ograničenje kao prošla četiri nastavka.
+
+---
+
 **Zadnje ažurirano:** 2026-08-26, tridesetpeti nastavak - praćenje plaćanja
 najma (RentPayment) za weekly/monthly ugovore, uklj. "Najmovi" stranicu,
 notifikacije vlasniku (dospijeće + petkov standing podsjetnik) i email

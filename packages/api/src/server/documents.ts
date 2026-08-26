@@ -126,6 +126,7 @@ export async function finalizeContractDocuments(contractId: string): Promise<voi
         content: contract.termsAndConditions.content,
         contractNumber: contract.number,
         acceptedAt: contract.termsAcceptedAt,
+        signatureUrl,
       })
     : null;
 

@@ -1,4 +1,4 @@
-import { Document, Page, Text, View } from "./components";
+import { Document, Page, Text, View, Image } from "./components";
 import { styles } from "./styles";
 import { formatDateTime } from "./format";
 
@@ -8,6 +8,10 @@ export interface TermsPdfProps {
   content: string;
   contractNumber: number;
   acceptedAt: Date | null;
+  // Isti potpis kao na ContractPdf/ProtocolPdf (jedan potpis po ugovoru,
+  // vidi Contract.signatureKey) - prihvaćanje uvjeta je dio istog potpisnog
+  // čina, ne zaseban potpis, pa je isti signatureUrl ispravan izvor.
+  signatureUrl: string;
 }
 
 /**
@@ -17,7 +21,14 @@ export interface TermsPdfProps {
  * Zaseban jednostavan generator (ne dio ContractPdf-a) jer sadržaj varira u
  * duljini (rastao/skraćivan tijekom vremena) i logički je zaseban dokument.
  */
-export function TermsPdfDocument({ companyName, version, content, contractNumber, acceptedAt }: TermsPdfProps) {
+export function TermsPdfDocument({
+  companyName,
+  version,
+  content,
+  contractNumber,
+  acceptedAt,
+  signatureUrl,
+}: TermsPdfProps) {
   const paragraphs = content.split("\n\n");
 
   return (
@@ -35,6 +46,12 @@ export function TermsPdfDocument({ companyName, version, content, contractNumber
               {paragraph}
             </Text>
           ))}
+        </View>
+
+        <View style={styles.signatureBlock}>
+          <Text style={styles.sectionTitle}>Potpis korisnika</Text>
+          {acceptedAt && <Text style={styles.photoDamage}>Prihvaćeno: {formatDateTime(acceptedAt)}</Text>}
+          <Image src={signatureUrl} style={styles.signatureImage} />
         </View>
       </Page>
     </Document>

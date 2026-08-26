@@ -32,13 +32,19 @@ export default function NajmoviScreen() {
     }
   }
 
+  // "Neplaćeno" prikazuje SAMO dospjele periode (dueDate <= danas), ne
+  // buduće koji tek dolaze - isti obrazac kao web. "Sve" ostaje potpuno
+  // nefiltriran (informativni puni raspored).
   const filtered = useMemo(() => {
-    if (filter === "unpaid") return payments.filter((p) => !p.paid);
+    const isDue = (p: RentPaymentDTO) => new Date(p.dueDate) <= new Date();
+    if (filter === "unpaid") return payments.filter((p) => !p.paid && isDue(p));
     if (filter === "paid") return payments.filter((p) => p.paid);
     return payments;
   }, [payments, filter]);
 
-  const totalUnpaid = payments.filter((p) => !p.paid).reduce((sum, p) => sum + p.amount, 0);
+  const totalUnpaid = payments
+    .filter((p) => !p.paid && new Date(p.dueDate) <= new Date())
+    .reduce((sum, p) => sum + p.amount, 0);
 
   return (
     <View style={styles.container}>

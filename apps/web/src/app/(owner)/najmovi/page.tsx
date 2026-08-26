@@ -46,16 +46,21 @@ export default function NajmoviPage() {
     load();
   }
 
-  // Neplaćeno prvo po defaultu (backend već sortira paid=false prije
-  // paid=true, dueDate rastuće unutar toga) - filter ovdje samo suzuje
-  // prikaz, ne mijenja poredak.
+  // "Neplaćeno" prikazuje SAMO dospjele periode (dueDate <= danas) - ne
+  // buduće tjedne/mjesece koji tek dolaze (npr. 4-tjedni ugovor ne smije
+  // odmah pokazati sva 4 tjedna kao "neplaćeno"). "Sve" ostaje POTPUNO
+  // nefiltriran (puni raspored, uklj. buduće) - to je namjerno "informativni
+  // pogled" bez posebne zasebne stranice, isti podatak je već ovdje.
   const filtered = useMemo(() => {
-    if (filter === "unpaid") return payments.filter((p) => !p.paid);
+    const isDue = (p: RentPaymentDTO) => new Date(p.dueDate) <= new Date();
+    if (filter === "unpaid") return payments.filter((p) => !p.paid && isDue(p));
     if (filter === "paid") return payments.filter((p) => p.paid);
     return payments;
   }, [payments, filter]);
 
-  const totalUnpaid = payments.filter((p) => !p.paid).reduce((sum, p) => sum + p.amount, 0);
+  const totalUnpaid = payments
+    .filter((p) => !p.paid && new Date(p.dueDate) <= new Date())
+    .reduce((sum, p) => sum + p.amount, 0);
 
   return (
     <div>
