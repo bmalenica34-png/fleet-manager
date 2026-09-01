@@ -31,9 +31,12 @@ export interface ContractPdfProps {
     vin: string | null;
   };
   client: {
+    type: "fizicka" | "pravna";
     firstName: string;
     lastName: string;
     oib: string;
+    companyName: string | null;
+    companyAddress: string | null;
     email: string;
     phone: string;
     address: string | null;
@@ -124,20 +127,45 @@ export function ContractPdfDocument({
 
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Račun za / Korisnik</Text>
-          <View style={styles.row}>
-            <Text style={styles.label}>Ime i prezime</Text>
-            <Text style={styles.value}>
-              {client.firstName} {client.lastName}
-            </Text>
-          </View>
-          <View style={styles.row}>
-            <Text style={styles.label}>Adresa</Text>
-            <Text style={styles.value}>{dash(client.address)}</Text>
-          </View>
-          <View style={styles.row}>
-            <Text style={styles.label}>OIB</Text>
-            <Text style={styles.value}>{client.oib}</Text>
-          </View>
+          {client.type === "pravna" ? (
+            <>
+              <View style={styles.row}>
+                <Text style={styles.label}>Naziv (pravna osoba)</Text>
+                <Text style={styles.value}>{dash(client.companyName)}</Text>
+              </View>
+              <View style={styles.row}>
+                <Text style={styles.label}>Adresa sjedišta</Text>
+                <Text style={styles.value}>{dash(client.companyAddress)}</Text>
+              </View>
+              <View style={styles.row}>
+                <Text style={styles.label}>OIB firme</Text>
+                <Text style={styles.value}>{client.oib}</Text>
+              </View>
+              <View style={styles.row}>
+                <Text style={styles.label}>Odgovorna osoba</Text>
+                <Text style={styles.value}>
+                  {client.firstName} {client.lastName}
+                </Text>
+              </View>
+            </>
+          ) : (
+            <>
+              <View style={styles.row}>
+                <Text style={styles.label}>Ime i prezime</Text>
+                <Text style={styles.value}>
+                  {client.firstName} {client.lastName}
+                </Text>
+              </View>
+              <View style={styles.row}>
+                <Text style={styles.label}>Adresa</Text>
+                <Text style={styles.value}>{dash(client.address)}</Text>
+              </View>
+              <View style={styles.row}>
+                <Text style={styles.label}>OIB</Text>
+                <Text style={styles.value}>{client.oib}</Text>
+              </View>
+            </>
+          )}
           <View style={styles.row}>
             <Text style={styles.label}>Email</Text>
             <Text style={styles.value}>{client.email}</Text>

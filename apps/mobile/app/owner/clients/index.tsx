@@ -11,7 +11,13 @@ import {
   View,
 } from "react-native";
 import { useFocusEffect, useRouter } from "expo-router";
-import { createClient, listClients, type ClientRecord } from "../../../src/lib/api";
+import {
+  createClient,
+  listClients,
+  lookupSudreg,
+  type ClientRecord,
+  type ClientType,
+} from "../../../src/lib/api";
 
 export default function ClientsScreen() {
   const router = useRouter();
@@ -19,9 +25,14 @@ export default function ClientsScreen() {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
 
+  const [type, setType] = useState<ClientType>("fizicka");
   const [firstName, setFirstName] = useState("");
   const [lastName, setLastName] = useState("");
   const [oib, setOib] = useState("");
+  const [companyName, setCompanyName] = useState("");
+  const [companyAddress, setCompanyAddress] = useState("");
+  const [lookupLoading, setLookupLoading] = useState(false);
+  const [lookupMessage, setLookupMessage] = useState<string | null>(null);
   const [email, setEmail] = useState("");
   const [phone, setPhone] = useState("");
   const [submitting, setSubmitting] = useState(false);
@@ -38,22 +49,63 @@ export default function ClientsScreen() {
   useFocusEffect(load);
 
   const canSubmit =
-    firstName.trim() && lastName.trim() && /^\d{11}$/.test(oib.trim()) && email.trim() && phone.trim();
+    firstName.trim() &&
+    lastName.trim() &&
+    /^\d{11}$/.test(oib.trim()) &&
+    email.trim() &&
+    phone.trim() &&
+    (type === "fizicka" || companyName.trim());
+
+  async function handleLookup() {
+    if (!/^\d{11}$/.test(oib.trim())) {
+      setLookupMessage("OIB firme mora imati 11 znamenki.");
+      return;
+    }
+    setLookupLoading(true);
+    setLookupMessage(null);
+    try {
+      const data = await lookupSudreg(oib.trim());
+      if (data.status === "pronadjen" && data.naziv) {
+        setCompanyName(data.naziv);
+        if (data.adresa) setCompanyAddress(data.adresa);
+        setLookupMessage("Podaci dohvaćeni iz sudskog registra.");
+      } else if (data.status === "neispravan_oib") {
+        setLookupMessage("Neispravan OIB (kontrolna znamenka).");
+      } else {
+        setLookupMessage("Nije pronađeno u sudskom registru — upiši ručno.");
+      }
+    } catch {
+      setLookupMessage("Sudski registar nedostupan — upiši ručno.");
+    } finally {
+      setLookupLoading(false);
+    }
+  }
 
   async function handleSubmit() {
     setFormError(null);
     setSubmitting(true);
     try {
       await createClient({
+        type,
         firstName: firstName.trim(),
         lastName: lastName.trim(),
         oib: oib.trim(),
         email: email.trim(),
         phone: phone.trim(),
+        ...(type === "pravna"
+          ? {
+              companyName: companyName.trim() || undefined,
+              companyAddress: companyAddress.trim() || undefined,
+            }
+          : {}),
       });
+      setType("fizicka");
       setFirstName("");
       setLastName("");
       setOib("");
+      setCompanyName("");
+      setCompanyAddress("");
+      setLookupMessage(null);
       setEmail("");
       setPhone("");
       load();
@@ -98,12 +150,18 @@ export default function ClientsScreen() {
       renderItem={({ item }) => (
         <View style={styles.row}>
           <Text style={styles.rowTitle}>
-            {item.firstName} {item.lastName}
+            {item.type === "pravna" && item.companyName
+              ? item.companyName
+              : `${item.firstName} ${item.lastName}`}
             {item.hasIncompleteData ? " ⚠️" : ""}
+          </Text>
+          <Text style={styles.rowMuted}>
+            {item.type === "pravna" ? "Pravna osoba" : "Fizička osoba"}
+            {item.type === "pravna" ? ` · ${item.firstName} ${item.lastName}` : ""}
           </Text>
           <Text style={styles.rowBody}>{item.email}</Text>
           <Text style={styles.rowMuted}>
-            OIB {item.oib} · {item.phone}
+            {item.type === "pravna" ? "OIB firme" : "OIB"} {item.oib} · {item.phone}
           </Text>
           {item.hasIncompleteData && (
             <Text style={styles.rowMuted}>Nedostaje: {item.incompleteReasons.join(", ")}</Text>
@@ -114,16 +172,90 @@ export default function ClientsScreen() {
       ListFooterComponent={
         <View style={styles.form}>
           <Text style={styles.sectionTitle}>Novi klijent</Text>
-          <TextInput style={styles.input} placeholder="Ime" value={firstName} onChangeText={setFirstName} />
-          <TextInput style={styles.input} placeholder="Prezime" value={lastName} onChangeText={setLastName} />
+
+          <View style={styles.segment}>
+            <Pressable
+              style={[styles.segmentBtn, type === "fizicka" && styles.segmentBtnActive]}
+              onPress={() => {
+                setType("fizicka");
+                setLookupMessage(null);
+              }}
+            >
+              <Text style={[styles.segmentText, type === "fizicka" && styles.segmentTextActive]}>
+                Fizička osoba
+              </Text>
+            </Pressable>
+            <Pressable
+              style={[styles.segmentBtn, type === "pravna" && styles.segmentBtnActive]}
+              onPress={() => setType("pravna")}
+            >
+              <Text style={[styles.segmentText, type === "pravna" && styles.segmentTextActive]}>
+                Pravna osoba
+              </Text>
+            </Pressable>
+          </View>
+
+          {type === "pravna" && (
+            <>
+              <View style={{ flexDirection: "row", gap: 8 }}>
+                <TextInput
+                  style={[styles.input, { flex: 1 }]}
+                  placeholder="OIB firme (11 znamenki)"
+                  value={oib}
+                  onChangeText={setOib}
+                  keyboardType="number-pad"
+                  maxLength={11}
+                />
+                <Pressable
+                  style={[styles.lookupBtn, lookupLoading && styles.buttonDisabled]}
+                  onPress={handleLookup}
+                  disabled={lookupLoading}
+                >
+                  {lookupLoading ? (
+                    <ActivityIndicator color="#fff" size="small" />
+                  ) : (
+                    <Text style={styles.buttonText}>Pretraži</Text>
+                  )}
+                </Pressable>
+              </View>
+              {lookupMessage && <Text style={styles.muted}>{lookupMessage}</Text>}
+              <TextInput
+                style={styles.input}
+                placeholder="Naziv firme"
+                value={companyName}
+                onChangeText={setCompanyName}
+              />
+              <TextInput
+                style={styles.input}
+                placeholder="Adresa sjedišta"
+                value={companyAddress}
+                onChangeText={setCompanyAddress}
+              />
+            </>
+          )}
+
           <TextInput
             style={styles.input}
-            placeholder="OIB (11 znamenki)"
-            value={oib}
-            onChangeText={setOib}
-            keyboardType="number-pad"
-            maxLength={11}
+            placeholder={type === "pravna" ? "Ime (odgovorna osoba)" : "Ime"}
+            value={firstName}
+            onChangeText={setFirstName}
           />
+          <TextInput
+            style={styles.input}
+            placeholder={type === "pravna" ? "Prezime (odgovorna osoba)" : "Prezime"}
+            value={lastName}
+            onChangeText={setLastName}
+          />
+          {type === "fizicka" && (
+            <TextInput
+              style={styles.input}
+              placeholder="OIB (11 znamenki)"
+              value={oib}
+              onChangeText={setOib}
+              keyboardType="number-pad"
+              maxLength={11}
+            />
+          )}
           <TextInput
             style={styles.input}
             placeholder="Email"
@@ -175,4 +307,16 @@ const styles = StyleSheet.create({
   button: { backgroundColor: "#111", padding: 14, borderRadius: 8, alignItems: "center", marginTop: 6 },
   buttonDisabled: { opacity: 0.5 },
   buttonText: { color: "#fff", fontWeight: "600" },
+  segment: { flexDirection: "row", borderWidth: 1, borderColor: "#111", borderRadius: 8, overflow: "hidden" },
+  segmentBtn: { flex: 1, padding: 12, alignItems: "center", backgroundColor: "#fff" },
+  segmentBtnActive: { backgroundColor: "#111" },
+  segmentText: { color: "#111", fontWeight: "600", fontSize: 14 },
+  segmentTextActive: { color: "#fff" },
+  lookupBtn: {
+    backgroundColor: "#111",
+    borderRadius: 8,
+    paddingHorizontal: 14,
+    justifyContent: "center",
+    alignItems: "center",
+  },
 });

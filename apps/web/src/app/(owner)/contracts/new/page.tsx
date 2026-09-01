@@ -212,7 +212,10 @@ export default function NewContractPage() {
             </option>
             {clients.map((c) => (
               <option key={c.id} value={c.id}>
-                {c.firstName} {c.lastName} ({c.email})
+                {c.type === "pravna" && c.companyName
+                  ? `${c.companyName} — ${c.firstName} ${c.lastName}`
+                  : `${c.firstName} ${c.lastName}`}{" "}
+                ({c.email})
               </option>
             ))}
           </select>

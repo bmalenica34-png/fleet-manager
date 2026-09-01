@@ -1,4 +1,4 @@
-import type { Client } from "@prisma/client";
+import type { Client, ClientType } from "@prisma/client";
 import { prisma } from "../db/client";
 import type { ClientCreateInput, ClientDocumentSlot, ClientUpdateInput } from "../schemas/client";
 import { deleteObject, getPresignedDownloadUrl } from "../storage/hetzner";
@@ -39,9 +39,12 @@ const SLOT_FIELD: Record<ClientDocumentSlot, keyof Client> = {
 
 export interface ClientDTO {
   id: string;
+  type: ClientType;
   firstName: string;
   lastName: string;
   oib: string;
+  companyName: string | null;
+  companyAddress: string | null;
   email: string;
   phone: string;
   address: string | null;
@@ -78,9 +81,12 @@ async function toClientDTO(client: Client): Promise<ClientDTO> {
 
   return {
     id: client.id,
+    type: client.type,
     firstName: client.firstName,
     lastName: client.lastName,
     oib: client.oib,
+    companyName: client.companyName,
+    companyAddress: client.companyAddress,
     email: client.email,
     phone: client.phone,
     address: client.address,

@@ -308,11 +308,16 @@ export function ocrInsurancePolicy(file: PickedFile): Promise<InsurancePolicyOcr
 }
 
 // --- Klijenti ---
+export type ClientType = "fizicka" | "pravna";
+
 export interface ClientRecord {
   id: string;
+  type: ClientType;
   firstName: string;
   lastName: string;
   oib: string;
+  companyName: string | null;
+  companyAddress: string | null;
   email: string;
   phone: string;
   hasIncompleteData: boolean;
@@ -324,9 +329,12 @@ export function listClients(): Promise<ClientRecord[]> {
 }
 
 export interface ClientCreateInput {
+  type?: ClientType;
   firstName: string;
   lastName: string;
   oib: string;
+  companyName?: string;
+  companyAddress?: string;
   email: string;
   phone: string;
 }
@@ -336,6 +344,19 @@ export function createClient(input: ClientCreateInput): Promise<ClientRecord> {
     method: "POST",
     body: JSON.stringify(input),
   });
+}
+
+// Pretraga tvrtke po OIB-u u sudskom registru (auto-popuna forme za pravnu
+// osobu). Nikad ne baca - vraća status koji UI koristi za poruku; ručni unos
+// ostaje moguć. Vidi packages/api/src/server/sudreg.ts.
+export interface SudregLookupResult {
+  status: "pronadjen" | "nedostupan" | "neispravan_oib";
+  naziv: string | null;
+  adresa: string | null;
+}
+
+export function lookupSudreg(oib: string): Promise<SudregLookupResult> {
+  return apiFetch(`/api/sudreg/${oib}`);
 }
 
 // Isti obrazac kao vehicle CSV import (web) - red se uvijek uveze, samo

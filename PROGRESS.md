@@ -4,9 +4,89 @@ Dinamički log stanja projekta. Ažurira se na kraju svake sesije. Za statičnu
 arhitekturu/konvencije vidi [CLAUDE.md](CLAUDE.md) — ovaj dokument je "što je
 gotovo i zašto", ne "kako treba izgledati".
 
-**Zadnje ažurirano:** 2026-08-26, tridesetšesti nastavak - tri prijavljena
-buga iz produkcijskog testiranja prošlog nastavka (payment tracking),
-popravljena dva, treći ispao false positive nakon istrage.
+**Zadnje ažurirano:** 2026-09-01, tridesetsedmi nastavak - tip klijenta
+(fizička/pravna osoba) + OIB lookup preko sudskog registra, portano iz
+FLEET projekta. Web + mobile. Kod gotov i typecheck/build čist; live sudreg
+lookup testiran i radi (kredencijali u Vercel produkcijskom env-u);
+migracija NIJE deployana (čeka potvrdu korisnika).
+
+**0) Prethodni istražni korak (fiskalizacija).** Prije ovog zadatka
+napravljen je audit FLEET projekta (`C:\Users\Brane\FLEET`) za buduću
+hrvatsku fiskalizaciju (Tier 5). Nalaz: `backend/src/services/
+fiskalizacija.ts` (~370 linija, čisti Node/TS, node-forge + xml-crypto +
+xmldom) je izdvojiv engine za ZKI/JIR/XMLDSig/CIS SOAP. Generički je (prima
+samo brRacuna/datum/iznos/nacinPlacanja). Rupe za R1/R2: nema PDV bloka
+(hardkodiran `USustPdv=false`), nema `PoslovniProstorZahtjev`, treba prod
+FINA cert. Otvoreno strateško pitanje: Fiskalizacija 2.0 / eRačun od
+1.1.2026 - stari SOAP model možda nije dovoljan za B2B. Ništa nije
+implementirano, samo izvještaj.
+
+**1) `Client.type` (enum `ClientType`: `fizicka` default / `pravna`).**
+Migracija `20260901120000_add_client_type_and_company` dodaje `type`
+(NOT NULL default `fizicka` - postojeći redovi nepromijenjeni),
+`companyName`, `companyAddress` (oba nullable). Za pravnu osobu:
+`Client.oib` drži OIB TVRTKE (korisnikov izbor - ne dodaje se zasebno polje
+za osobni OIB), `firstName`/`lastName` su odgovorna/kontakt osoba (i dalje
+NOT NULL, obavezni u formi). Zod `clientCreateSchema`/`clientUpdateSchema`
+prebačeni na `clientFieldsSchema` + `superRefine` koji traži `companyName`
+kad je `type === "pravna"`.
+
+**2) OIB lookup - `packages/api/src/server/sudreg.ts`** (portano iz
+FLEET `backend/src/routes/sudreg.ts`). `lookupCompanyByOib(oib)` →
+`{ status: "pronadjen"|"nedostupan"|"neispravan_oib", naziv, adresa }`.
+OAuth2 client-credentials na `sudreg-data.gov.hr` (token keširan ~1h),
+`detalji_subjekta?tip_identifikatora=oib` endpoint, parsiranje
+`data.tvrtka.ime` + `data.sjediste.{ulica,kucni_broj,postanski_broj,
+naziv_naselja}` (isto kao FLEET). Env: `SUDREG_CLIENT_ID`,
+`SUDREG_CLIENT_SECRET` (obavezni), `SUDREG_TOKEN_URL`, `SUDREG_API_BASE`
+(defaulti postavljeni). BEZ kredencijala → `status: "nedostupan"`, forma
+pada na ručni unos (nikad ne blokira). Dodan i `isValidOib()` (MOD 11,10
+kontrolna znamenka). Nova ruta `GET /api/sudreg/[oib]` (owner session).
+
+**3) Web.** `clients/page.tsx`: radio Fizička/Pravna; kad pravna → "OIB
+firme" + gumb "Pretraži" (auto-popuna naziv/adresa) + polja naziv firme
+(obavezno) / adresa sjedišta, + labeli "Ime/Prezime (odgovorna osoba)".
+Lista: nova kolona "Tip", prikazuje naziv firme za pravnu (+ kontakt osoba
+u zagradi), pretraga i po nazivu firme. `clients/[id]`: tip + blok naziv
+firme / adresa sjedišta / odgovorna osoba / "OIB firme". `contracts/new`:
+dropdown klijenta prikazuje naziv firme za pravnu osobu.
+
+**4) Mobile paritet.** `owner/clients/index.tsx`: segment toggle
+Fizička/Pravna + isti conditional lookup flow ("Pretraži" gumb, poruke,
+ručni fallback) + prikaz tipa/firme u listi. `owner/contracts/new.tsx`:
+isti dropdown label. `src/lib/api.ts`: `ClientRecord`/`ClientCreateInput`
+prošireni, nova `lookupSudreg(oib)`.
+
+**5) PDF (minimalno, aditivno).** `ContractPdf.tsx` "Račun za / Korisnik"
+sekcija: za `type === "pravna"` prikazuje Naziv (pravna osoba) / Adresa
+sjedišta / OIB firme / Odgovorna osoba; fizička osoba nepromijenjena.
+`documents.ts` prosljeđuje nova polja u snapshot. ProtocolPdf/AnnexPdf
+nedirani (samo ime, ostaje kontakt osoba).
+
+**Verifikacija.** `tsc --noEmit` čisto na sva tri paketa
+(`@rent-a-car/api`, `@rent-a-car/web`, `@rent-a-car/mobile`); `next build`
+(apps/web) prošao, `/api/sudreg/[oib]` ruta registrirana. Scratch test
+(`npx tsx` iz packages/api): Zod validacija (fizička bez firme prolazi,
+pravna bez `companyName` pada s issue na `companyName`), `isValidOib`
+(ispravno prihvaća/odbija kontrolne znamenke).
+
+**Live sudreg test - PROŠAO.** Korisnik dostavio SUDREG_CLIENT_ID/SECRET
+(izvor: nije bilo u FLEET-u na disku, korisnik ih dao izravno - vjerojatno
+Railway env FLEET backenda ili nova registracija). Dodani u **Vercel
+produkcijski env projekta `fleet-manager-web`** preko `vercel env add ...
+production` (Secret type). Scratch test protiv PRAVOG sudreg-data.gov.hr
+API-ja: OIB 81793146560 → "Hrvatski Telekom d.d." / "Radnička cesta 21,
+Zagreb"; 92590920313 → "LUKA RIJEKA d.d. ..." / "Riva 1, Rijeka";
+36201212847 → "Valamar Riviera d.d. ..." / "Stancija Kaligari 1, Poreč" -
+sve ispravno auto-popunjeno. Nepostojeći OIB → API vraća HTTP 400
+error_code 505 ("nije vratio ni jedan redak"), kod to prepoznaje kao
+"nedostupan" (ne loga kao grešku) → forma pada na ručni unos. NAPOMENA:
+Vercel env promjene vrijede tek za sljedeći deploy.
+
+**NIJE testirano protiv produkcijske baze** - migracija još nije deployana
+(`type` kolona ne postoji), čeka eksplicitnu potvrdu korisnika prije
+`prisma migrate deploy`. Scratch skripte obrisane, `packages/api/.env`
+uklonjen, `git status` čist osim namjernih izmjena. Ništa nije commitano.
 
 **1) "Najmovi" 'neplaćeno' filter pokazivao SVE buduće periode.** Popravak
 je ISKLJUČIVO client-side - `listRentPayments()` i dalje vraća SVE retke

@@ -335,11 +335,25 @@ model TermsAndConditions {
 // Client
 // ---------------------------------------------------------------------------
 
+enum ClientType {
+  fizicka
+  pravna
+}
+
 model Client {
   id                String   @id @default(cuid())
+  // Tip klijenta. `fizicka` (default) - postojeće ponašanje nepromijenjeno,
+  // firstName/lastName/oib su podaci fizičke osobe. `pravna` - oib je OIB
+  // TVRTKE (ne osobe), companyName/companyAddress drže podatke sjedišta
+  // (auto-popunjeni preko sudskog registra, vidi server/sudreg.ts);
+  // firstName/lastName su kontakt/odgovorna osoba koja potpisuje i vozi.
+  type              ClientType @default(fizicka)
   firstName         String
   lastName          String
+  // Za `fizicka` OIB osobe, za `pravna` OIB tvrtke (@unique vrijedi za oba).
   oib               String   @unique
+  companyName       String?
+  companyAddress    String?
   email             String
   phone             String
   address           String?

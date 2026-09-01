@@ -117,8 +117,13 @@ export default function ClientDetailPage() {
   return (
     <div>
       <h1>
-        {client.firstName} {client.lastName}
+        {client.type === "pravna" && client.companyName
+          ? client.companyName
+          : `${client.firstName} ${client.lastName}`}
       </h1>
+      <p className="muted" style={{ marginTop: "-0.5rem" }}>
+        {client.type === "pravna" ? "Pravna osoba" : "Fizička osoba"}
+      </p>
 
       {client.hasIncompleteData && (
         <div
@@ -136,8 +141,26 @@ export default function ClientDetailPage() {
       )}
 
       <div style={{ marginBottom: "1rem" }}>
+        {client.type === "pravna" && (
+          <>
+            <p style={{ margin: "0.2rem 0" }}>
+              <span className="muted">Naziv firme: </span>
+              {client.companyName ?? "—"}
+            </p>
+            {client.companyAddress && (
+              <p style={{ margin: "0.2rem 0" }}>
+                <span className="muted">Adresa sjedišta: </span>
+                {client.companyAddress}
+              </p>
+            )}
+            <p style={{ margin: "0.2rem 0" }}>
+              <span className="muted">Odgovorna osoba: </span>
+              {client.firstName} {client.lastName}
+            </p>
+          </>
+        )}
         <p style={{ margin: "0.2rem 0" }}>
-          <span className="muted">OIB: </span>
+          <span className="muted">{client.type === "pravna" ? "OIB firme: " : "OIB: "}</span>
           {client.oib}
         </p>
         <p style={{ margin: "0.2rem 0" }}>

@@ -251,7 +251,10 @@ export default function NewContractScreen() {
                   onPress={() => setClientId(c.id)}
                 >
                   <Text style={clientId === c.id ? styles.optionTextActive : styles.optionText}>
-                    {c.firstName} {c.lastName} ({c.email})
+                    {c.type === "pravna" && c.companyName
+                      ? `${c.companyName} — ${c.firstName} ${c.lastName}`
+                      : `${c.firstName} ${c.lastName}`}{" "}
+                    ({c.email})
                   </Text>
                 </Pressable>
               ))}

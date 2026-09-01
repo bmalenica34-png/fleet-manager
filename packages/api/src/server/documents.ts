@@ -91,9 +91,12 @@ export async function finalizeContractDocuments(contractId: string): Promise<voi
         vin: contract.vehicle.vin,
       },
       client: {
+        type: contract.client.type,
         firstName: contract.client.firstName,
         lastName: contract.client.lastName,
         oib: contract.client.oib,
+        companyName: contract.client.companyName,
+        companyAddress: contract.client.companyAddress,
         email: contract.client.email,
         phone: contract.client.phone,
         address: contract.client.address,
