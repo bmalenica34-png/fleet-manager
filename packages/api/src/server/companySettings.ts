@@ -19,10 +19,23 @@ export interface CompanySettingsDTO {
   reportCustomIntervalDays: number | null;
   reportEmailEnabled: boolean;
   lastReportSentAt: Date | null;
+  // Fiskalizacija - cert base64/password se NE vraćaju frontendu (tajna);
+  // `hasFinaCert` je dovoljno za prikaz stanja.
+  vatRegistered: boolean;
+  hasFinaCert: boolean;
+  finaOib: string | null;
+  finaPremiseLabel: string | null;
+  finaDeviceLabel: string | null;
+  finaPremiseStreet: string | null;
+  finaPremiseHouseNumber: string | null;
+  finaPremiseCity: string | null;
+  finaPremisePostalCode: string | null;
+  finaPremiseWorkHours: string | null;
+  finaPremiseRegisteredAt: Date | null;
   updatedAt: Date;
 }
 
-async function toDTO(settings: {
+type SettingsRow = {
   name: string | null;
   oib: string | null;
   address: string | null;
@@ -33,8 +46,21 @@ async function toDTO(settings: {
   reportCustomIntervalDays: number | null;
   reportEmailEnabled: boolean;
   lastReportSentAt: Date | null;
+  vatRegistered: boolean;
+  finaCertBase64: string | null;
+  finaOib: string | null;
+  finaPremiseLabel: string | null;
+  finaDeviceLabel: string | null;
+  finaPremiseStreet: string | null;
+  finaPremiseHouseNumber: string | null;
+  finaPremiseCity: string | null;
+  finaPremisePostalCode: string | null;
+  finaPremiseWorkHours: string | null;
+  finaPremiseRegisteredAt: Date | null;
   updatedAt: Date;
-}): Promise<CompanySettingsDTO> {
+};
+
+async function toDTO(settings: SettingsRow): Promise<CompanySettingsDTO> {
   return {
     name: settings.name,
     oib: settings.oib,
@@ -46,6 +72,17 @@ async function toDTO(settings: {
     reportCustomIntervalDays: settings.reportCustomIntervalDays,
     reportEmailEnabled: settings.reportEmailEnabled,
     lastReportSentAt: settings.lastReportSentAt,
+    vatRegistered: settings.vatRegistered,
+    hasFinaCert: settings.finaCertBase64 != null,
+    finaOib: settings.finaOib,
+    finaPremiseLabel: settings.finaPremiseLabel,
+    finaDeviceLabel: settings.finaDeviceLabel,
+    finaPremiseStreet: settings.finaPremiseStreet,
+    finaPremiseHouseNumber: settings.finaPremiseHouseNumber,
+    finaPremiseCity: settings.finaPremiseCity,
+    finaPremisePostalCode: settings.finaPremisePostalCode,
+    finaPremiseWorkHours: settings.finaPremiseWorkHours,
+    finaPremiseRegisteredAt: settings.finaPremiseRegisteredAt,
     updatedAt: settings.updatedAt,
   };
 }
@@ -62,10 +99,42 @@ export async function getCompanySettings(): Promise<CompanySettingsDTO> {
 export async function updateCompanySettings(
   input: CompanySettingsUpdateInput
 ): Promise<CompanySettingsDTO> {
+  // Ako se promijeni OIB / oznaka prostora / adresa prostora, prethodna CIS
+  // registracija poslovnog prostora više ne vrijedi - očisti marker da UI
+  // ponovno traži "Registriraj poslovni prostor".
+  const premiseTouched =
+    input.finaOib !== undefined ||
+    input.finaPremiseLabel !== undefined ||
+    input.finaPremiseStreet !== undefined ||
+    input.finaPremiseHouseNumber !== undefined ||
+    input.finaPremiseCity !== undefined ||
+    input.finaPremisePostalCode !== undefined;
+
+  const data = premiseTouched ? { ...input, finaPremiseRegisteredAt: null } : input;
+
   const settings = await prisma.companySettings.upsert({
     where: { id: SETTINGS_ID },
-    create: { id: SETTINGS_ID, ...input },
-    update: input,
+    create: { id: SETTINGS_ID, ...data },
+    update: data,
+  });
+  return toDTO(settings);
+}
+
+/** Sprema FINA cert (.p12/.pfx) kao base64 + zaporku. Cert se nikad ne vraća. */
+export async function setFinaCert(certBase64: string, password: string): Promise<CompanySettingsDTO> {
+  const settings = await prisma.companySettings.upsert({
+    where: { id: SETTINGS_ID },
+    create: {
+      id: SETTINGS_ID,
+      finaCertBase64: certBase64,
+      finaCertPassword: password,
+      finaPremiseRegisteredAt: null,
+    },
+    update: {
+      finaCertBase64: certBase64,
+      finaCertPassword: password,
+      finaPremiseRegisteredAt: null,
+    },
   });
   return toDTO(settings);
 }

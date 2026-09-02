@@ -5,9 +5,14 @@ import { ProtocolPdfDocument, type ProtocolPdfProps } from "./ProtocolPdf";
 import { AnnexPdfDocument, type AnnexPdfProps } from "./AnnexPdf";
 import { TermsPdfDocument, type TermsPdfProps } from "./TermsPdf";
 import { ReportPdfDocument, type ReportPdfProps } from "./ReportPdf";
+import { InvoicePdfDocument, type InvoicePdfProps } from "./InvoicePdf";
 
 export async function renderContractPdf(props: ContractPdfProps): Promise<Buffer> {
   return renderToBuffer(<ContractPdfDocument {...props} />);
+}
+
+export async function renderInvoicePdf(props: InvoicePdfProps): Promise<Buffer> {
+  return renderToBuffer(<InvoicePdfDocument {...props} />);
 }
 
 export async function renderProtocolPdf(props: ProtocolPdfProps): Promise<Buffer> {

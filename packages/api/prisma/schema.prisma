@@ -297,6 +297,34 @@ model CompanySettings {
   reportEmailEnabled       Boolean         @default(true)
   lastReportSentAt         DateTime? // dedupe - isti obrazac kao registrationReminder*SentAt
 
+  // ── Fiskalizacija (hrvatski CIS / Porezna uprava) ──────────────────────
+  // Je li tvrtka u sustavu PDV-a. true → računi i CIS XML uključuju Pdv blok
+  // (osnovica + 25% + ukupno). false → mali porezni obveznik, napomena o
+  // oslobođenju (čl. 90. st. 1. Zakona o PDV-u).
+  vatRegistered Boolean @default(true)
+  // FINA aplikacijski certifikat (.p12/.pfx) kao base64 + zaporka. U PROBNOJ
+  // fazi ovo je FINA TESTNI cert (cistest CIS okolina). Struktura ista kao
+  // FLEET `firme` tablica. finaOib je OIB na koji je cert registriran -
+  // fiskalizacija ide pod TIM OIB-om (u probnoj fazi ≠ CompanySettings.oib).
+  finaCertBase64   String?
+  finaCertPassword String?
+  finaOib          String?
+  // Oznaka poslovnog prostora (OznPosPr) i naplatnog uređaja (OznNapUr) -
+  // ulaze u ZKI i broj računa. Default "1"/"1" ako nije postavljeno.
+  finaPremiseLabel String? // OznPosPr
+  finaDeviceLabel  String? // OznNapUr
+  // Strukturirana adresa poslovnog prostora - CIS PoslovniProstorZahtjev
+  // traži zasebne elemente (Ulica/KucniBroj/Naselje/PostBr), free-text
+  // CompanySettings.address se ne može pouzdano parsirati.
+  finaPremiseStreet      String?
+  finaPremiseHouseNumber String?
+  finaPremiseCity        String?
+  finaPremisePostalCode  String?
+  finaPremiseWorkHours   String? // npr. "Pon-Pet 08:00-16:00"
+  // Postavljen kad je PoslovniProstorZahtjev uspješno prošao kod CIS-a
+  // (zakonski preduvjet prije fiskalizacije računa). Dedupe/status marker.
+  finaPremiseRegisteredAt DateTime?
+
   updatedAt DateTime @updatedAt
 
   @@map("company_settings")
@@ -404,6 +432,7 @@ model Client {
   updatedAt         DateTime @updatedAt
 
   contracts Contract[]
+  invoices  Invoice[]
 
   @@map("clients")
 }
@@ -524,6 +553,7 @@ model Contract {
   handoverPhotos HandoverPhoto[]
   annexes        Annex[]
   photoRequests  PhotoRequest[]
+  invoices       Invoice[]
 
   @@index([clientId])
   @@index([vehicleId])
@@ -561,6 +591,10 @@ model RentPayment {
   // svaka notifikacija ide najviše jednom po retku.
   ownerDueNotifiedAt      DateTime?
   clientOverdueNotifiedAt DateTime?
+
+  // Račun izdan za ovaj period (opcionalno - owner bira "izdaj račun" pri
+  // označavanju plaćenim). Jedan period → najviše jedan račun.
+  invoice Invoice?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -695,4 +729,72 @@ model PhotoRequest {
 
   @@index([contractId])
   @@map("photo_requests")
+}
+
+// ---------------------------------------------------------------------------
+// Invoice (fiskalizirani R1/R2 račun - hrvatska fiskalizacija)
+// ---------------------------------------------------------------------------
+
+enum InvoiceType {
+  R1 // primatelj je pravna osoba (Client.type "pravna") - iskazan OIB primatelja
+  R2 // primatelj je fizička osoba
+}
+
+enum InvoiceStatus {
+  fiscalized // JIR uspješno dobiven iz CIS-a
+  failed // fiskalizacija pala - broj računa ZADRŽAN (bez rupa), retry moguć
+}
+
+// Jedan izdani račun. Trenutno se izdaje ISKLJUČIVO iz "Najmovi" toka (klik
+// "Plaćeno" → "Izdati račun?") za jedan RentPayment period. Broj računa
+// (brOznRac/oznPosPr/oznNapUr) je sekvencijalan po godini izdavanja BEZ
+// RUPA - broj se dodijeli prije fiskalizacije i zadrži čak i ako
+// fiskalizacija padne (status "failed", retry ide na ISTI broj).
+model Invoice {
+  id String @id @default(cuid())
+
+  year     Int // godina izdavanja - broj se resetira svake godine
+  brOznRac Int // redni broj računa unutar godine/prostora/uređaja
+  oznPosPr String // oznaka poslovnog prostora (iz CompanySettings.finaPremiseLabel)
+  oznNapUr String // oznaka naplatnog uređaja (iz CompanySettings.finaDeviceLabel)
+
+  type   InvoiceType
+  status InvoiceStatus @default(failed)
+
+  rentPaymentId String?      @unique
+  rentPayment   RentPayment? @relation(fields: [rentPaymentId], references: [id])
+  contractId    String?
+  contract      Contract?    @relation(fields: [contractId], references: [id])
+  clientId      String?
+  client        Client?      @relation(fields: [clientId], references: [id])
+
+  issuedAt        DateTime @default(now())
+  invoiceDateTime DateTime // DatVrijeme (lokalno vrijeme) - ulazi u ZKI i XML
+
+  totalAmount   Float // ukupno s PDV-om
+  netAmount     Float // osnovica
+  vatAmount     Float // iznos PDV-a
+  vatRate       Float // 25 ili 0
+  paymentMethod String // CIS oznaka načina plaćanja: G/K/T/O
+
+  oibIssuer    String // OIB pod kojim je fiskalizirano (CompanySettings.finaOib)
+  zki          String
+  jir          String?
+  fiscalizedAt DateTime?
+  errorMessage String? // popunjeno kad status = failed
+
+  // Snapshot primatelja u trenutku izdavanja (klijent se kasnije može mijenjati)
+  recipientName    String
+  recipientOib     String?
+  recipientAddress String?
+
+  pdfKey String? // S3 key generiranog PDF-a (Hetzner)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([year, oznPosPr, oznNapUr, brOznRac])
+  @@index([contractId])
+  @@index([clientId])
+  @@map("invoices")
 }

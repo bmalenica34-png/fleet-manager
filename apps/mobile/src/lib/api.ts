@@ -719,7 +719,96 @@ export function listRentPayments(): Promise<RentPaymentDTO[]> {
   return apiFetch("/api/rent-payments");
 }
 
-/** Jedan tap "Plaćeno" - isti POST /api/rent-payments/[id]/mark-paid endpoint kao web. */
-export function markRentPaymentPaid(id: string): Promise<RentPaymentDTO> {
-  return apiFetch(`/api/rent-payments/${id}/mark-paid`, { method: "POST" });
+export interface MarkPaidResult {
+  rentPayment: RentPaymentDTO;
+  invoice?: InvoiceDTO;
+  invoiceError?: string;
+}
+
+/**
+ * Označi period plaćenim. `issueInvoice: true` dodatno pokreće fiskalizaciju
+ * + PDF + mail klijentu (isti endpoint/ponašanje kao web modal "Izdati
+ * račun?"). Bez toga: samo paid=true, kao prije.
+ */
+export function markRentPaymentPaid(id: string, issueInvoice = false): Promise<MarkPaidResult> {
+  return apiFetch(`/api/rent-payments/${id}/mark-paid`, {
+    method: "POST",
+    body: JSON.stringify({ issueInvoice }),
+  });
+}
+
+// --- Izdani računi (fiskalizirani R1/R2) ---
+export type InvoiceType = "R1" | "R2";
+
+export interface InvoiceDTO {
+  id: string;
+  number: string;
+  year: number;
+  type: InvoiceType;
+  status: "fiscalized" | "failed";
+  issuedAt: string;
+  invoiceDateTime: string;
+  recipientName: string;
+  recipientOib: string | null;
+  contractNumber: number | null;
+  vehicleLabel: string | null;
+  totalAmount: number;
+  netAmount: number;
+  vatAmount: number;
+  vatRate: number;
+  jir: string | null;
+  zki: string;
+  errorMessage: string | null;
+  hasPdf: boolean;
+}
+
+export function listInvoices(): Promise<InvoiceDTO[]> {
+  return apiFetch("/api/invoices");
+}
+
+export function getInvoicePdfUrl(id: string): Promise<{ url: string }> {
+  return apiFetch(`/api/invoices/${id}/pdf`);
+}
+
+export function retryInvoice(id: string): Promise<{ invoice: InvoiceDTO }> {
+  return apiFetch(`/api/invoices/${id}/retry`, { method: "POST" });
+}
+
+// --- Fiskalizacijske postavke (podskup CompanySettings) ---
+export interface FiscalSettingsDTO {
+  vatRegistered: boolean;
+  hasFinaCert: boolean;
+  finaOib: string | null;
+  finaPremiseLabel: string | null;
+  finaDeviceLabel: string | null;
+  finaPremiseStreet: string | null;
+  finaPremiseHouseNumber: string | null;
+  finaPremiseCity: string | null;
+  finaPremisePostalCode: string | null;
+  finaPremiseWorkHours: string | null;
+  finaPremiseRegisteredAt: string | null;
+}
+
+export interface FiscalSettingsUpdateInput {
+  vatRegistered?: boolean;
+  finaOib?: string;
+  finaPremiseLabel?: string;
+  finaDeviceLabel?: string;
+  finaPremiseStreet?: string;
+  finaPremiseHouseNumber?: string;
+  finaPremiseCity?: string;
+  finaPremisePostalCode?: string;
+  finaPremiseWorkHours?: string;
+}
+
+export function getFiscalSettings(): Promise<FiscalSettingsDTO> {
+  return apiFetch("/api/settings");
+}
+
+export function updateFiscalSettings(input: FiscalSettingsUpdateInput): Promise<FiscalSettingsDTO> {
+  return apiFetch("/api/settings", { method: "PATCH", body: JSON.stringify(input) });
+}
+
+export function registerFiscalPremise(): Promise<FiscalSettingsDTO> {
+  return apiFetch("/api/fiscalization/register-premise", { method: "POST" });
 }

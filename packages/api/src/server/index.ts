@@ -13,6 +13,7 @@ export * from "./employees";
 export * from "./terms";
 export * from "./clients";
 export * from "./sudreg";
+export * from "./invoices";
 export * from "./contracts";
 export * from "./rentPayments";
 export * from "./signing";

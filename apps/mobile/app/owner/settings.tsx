@@ -1,11 +1,15 @@
 import { useEffect, useState } from "react";
-import { ActivityIndicator, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
+import { ActivityIndicator, Alert, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import { useRouter } from "expo-router";
 import { formatDateTimeHr } from "@rent-a-car/api";
 import {
   getCompanyReportSettings,
+  getFiscalSettings,
+  registerFiscalPremise,
   updateCompanyReportSettings,
+  updateFiscalSettings,
   type CompanyReportSettingsDTO,
+  type FiscalSettingsDTO,
   type ReportFrequency,
 } from "../../src/lib/api";
 
@@ -31,17 +35,84 @@ export default function SettingsScreen() {
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
 
+  // Fiskalizacija
+  const [fiscal, setFiscal] = useState<FiscalSettingsDTO | null>(null);
+  const [vatRegistered, setVatRegistered] = useState(true);
+  const [finaOib, setFinaOib] = useState("");
+  const [premiseLabel, setPremiseLabel] = useState("1");
+  const [deviceLabel, setDeviceLabel] = useState("1");
+  const [street, setStreet] = useState("");
+  const [houseNumber, setHouseNumber] = useState("");
+  const [city, setCity] = useState("");
+  const [postalCode, setPostalCode] = useState("");
+  const [workHours, setWorkHours] = useState("Pon-Pet 08:00-16:00");
+  const [fiscalSaving, setFiscalSaving] = useState(false);
+  const [registering, setRegistering] = useState(false);
+
+  function applyFiscal(data: FiscalSettingsDTO) {
+    setFiscal(data);
+    setVatRegistered(data.vatRegistered);
+    setFinaOib(data.finaOib ?? "");
+    setPremiseLabel(data.finaPremiseLabel ?? "1");
+    setDeviceLabel(data.finaDeviceLabel ?? "1");
+    setStreet(data.finaPremiseStreet ?? "");
+    setHouseNumber(data.finaPremiseHouseNumber ?? "");
+    setCity(data.finaPremiseCity ?? "");
+    setPostalCode(data.finaPremisePostalCode ?? "");
+    setWorkHours(data.finaPremiseWorkHours ?? "Pon-Pet 08:00-16:00");
+  }
+
   useEffect(() => {
-    getCompanyReportSettings()
-      .then((data) => {
-        setSettings(data);
-        setFrequency(data.reportFrequency);
-        setCustomDays(data.reportCustomIntervalDays ? String(data.reportCustomIntervalDays) : "7");
-        setEmailEnabled(data.reportEmailEnabled);
+    Promise.all([getCompanyReportSettings(), getFiscalSettings()])
+      .then(([reports, fisc]) => {
+        setSettings(reports);
+        setFrequency(reports.reportFrequency);
+        setCustomDays(reports.reportCustomIntervalDays ? String(reports.reportCustomIntervalDays) : "7");
+        setEmailEnabled(reports.reportEmailEnabled);
+        applyFiscal(fisc);
       })
       .catch((err) => setError(err instanceof Error ? err.message : "Greška"))
       .finally(() => setLoading(false));
   }, []);
+
+  async function handleSaveFiscal() {
+    if (finaOib && !/^\d{11}$/.test(finaOib)) {
+      Alert.alert("Greška", "FINA OIB mora imati 11 znamenki.");
+      return;
+    }
+    setFiscalSaving(true);
+    try {
+      const updated = await updateFiscalSettings({
+        vatRegistered,
+        finaOib: finaOib || undefined,
+        finaPremiseLabel: premiseLabel || undefined,
+        finaDeviceLabel: deviceLabel || undefined,
+        finaPremiseStreet: street || undefined,
+        finaPremiseHouseNumber: houseNumber || undefined,
+        finaPremiseCity: city || undefined,
+        finaPremisePostalCode: postalCode || undefined,
+        finaPremiseWorkHours: workHours || undefined,
+      });
+      applyFiscal(updated);
+      Alert.alert("Spremljeno", "Postavke fiskalizacije spremljene.");
+    } catch (err) {
+      Alert.alert("Greška", err instanceof Error ? err.message : "Nije spremljeno");
+    } finally {
+      setFiscalSaving(false);
+    }
+  }
+
+  async function handleRegisterPremise() {
+    setRegistering(true);
+    try {
+      applyFiscal(await registerFiscalPremise());
+      Alert.alert("CIS", "Poslovni prostor registriran.");
+    } catch (err) {
+      Alert.alert("CIS greška", err instanceof Error ? err.message : "Nije uspjelo");
+    } finally {
+      setRegistering(false);
+    }
+  }
 
   async function handleSave() {
     setError(null);
@@ -77,7 +148,7 @@ export default function SettingsScreen() {
   }
 
   return (
-    <View style={styles.container}>
+    <ScrollView style={{ flex: 1 }} contentContainerStyle={styles.container}>
       <View style={styles.header}>
         <Pressable onPress={() => router.back()}>
           <Text style={styles.backLink}>{"< Natrag"}</Text>
@@ -148,7 +219,77 @@ export default function SettingsScreen() {
           <Text style={styles.buttonText}>{saving ? "Spremanje..." : "Spremi postavke izvještaja"}</Text>
         </Pressable>
       </View>
-    </View>
+
+      <View style={styles.section}>
+        <Text style={styles.sectionTitle}>Fiskalizacija (R1 / R2)</Text>
+        <Text style={styles.muted}>
+          PROBNA faza — FINA testni certifikat, cistest CIS. Certifikat se postavlja na webu;
+          ovdje se uređuje konfiguracija i registrira poslovni prostor.
+        </Text>
+
+        <Pressable
+          style={[styles.chip, vatRegistered && styles.chipActive, { alignSelf: "flex-start", marginTop: 12 }]}
+          onPress={() => setVatRegistered((v) => !v)}
+        >
+          <Text style={vatRegistered ? styles.chipTextActive : styles.chipText}>
+            {vatRegistered ? "✓ " : ""}U sustavu PDV-a (25%)
+          </Text>
+        </Pressable>
+
+        <Text style={[styles.fieldLabel, { marginTop: 12 }]}>FINA OIB</Text>
+        <TextInput style={styles.input} keyboardType="number-pad" maxLength={11} value={finaOib} onChangeText={setFinaOib} />
+
+        <View style={{ flexDirection: "row", gap: 8 }}>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.fieldLabel}>Ozn. prostora</Text>
+            <TextInput style={styles.input} value={premiseLabel} onChangeText={setPremiseLabel} />
+          </View>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.fieldLabel}>Ozn. uređaja</Text>
+            <TextInput style={styles.input} value={deviceLabel} onChangeText={setDeviceLabel} />
+          </View>
+        </View>
+
+        <Text style={[styles.fieldLabel, { marginTop: 8 }]}>Ulica i kućni broj</Text>
+        <View style={{ flexDirection: "row", gap: 8 }}>
+          <TextInput style={[styles.input, { flex: 2 }]} value={street} onChangeText={setStreet} placeholder="Ulica" />
+          <TextInput style={[styles.input, { flex: 1 }]} value={houseNumber} onChangeText={setHouseNumber} placeholder="Kbr" />
+        </View>
+        <View style={{ flexDirection: "row", gap: 8 }}>
+          <TextInput style={[styles.input, { flex: 1 }]} value={postalCode} onChangeText={setPostalCode} placeholder="Pošt. br." keyboardType="number-pad" />
+          <TextInput style={[styles.input, { flex: 2 }]} value={city} onChangeText={setCity} placeholder="Naselje / grad" />
+        </View>
+        <Text style={[styles.fieldLabel, { marginTop: 8 }]}>Radno vrijeme</Text>
+        <TextInput style={styles.input} value={workHours} onChangeText={setWorkHours} />
+
+        <Pressable
+          style={[styles.button, fiscalSaving && styles.buttonDisabled]}
+          onPress={handleSaveFiscal}
+          disabled={fiscalSaving}
+        >
+          <Text style={styles.buttonText}>{fiscalSaving ? "Spremanje..." : "Spremi fiskalizaciju"}</Text>
+        </Pressable>
+
+        <Text style={[styles.muted, { marginTop: 12 }]}>
+          Certifikat: {fiscal?.hasFinaCert ? "✓ postavljen" : "nije postavljen (postavi na webu)"}
+        </Text>
+        <Text style={styles.muted}>
+          Poslovni prostor:{" "}
+          {fiscal?.finaPremiseRegisteredAt
+            ? `✓ registriran ${formatDateTimeHr(fiscal.finaPremiseRegisteredAt)}`
+            : "nije registriran"}
+        </Text>
+        <Pressable
+          style={[styles.button, (registering || !fiscal?.hasFinaCert) && styles.buttonDisabled]}
+          onPress={handleRegisterPremise}
+          disabled={registering || !fiscal?.hasFinaCert}
+        >
+          <Text style={styles.buttonText}>
+            {registering ? "Registracija..." : "Registriraj poslovni prostor"}
+          </Text>
+        </Pressable>
+      </View>
+    </ScrollView>
   );
 }
 

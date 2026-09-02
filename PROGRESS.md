@@ -4,6 +4,170 @@ Dinamički log stanja projekta. Ažurira se na kraju svake sesije. Za statičnu
 arhitekturu/konvencije vidi [CLAUDE.md](CLAUDE.md) — ovaj dokument je "što je
 gotovo i zašto", ne "kako treba izgledati".
 
+**Zadnje ažurirano:** 2026-09-02, tridesetosmi nastavak - port
+fiskalizacijskog engine-a + R1/R2 fakturiranje. **RADI: JIR se dobiva iz
+cistest-a.** s004 blokada RIJEŠENA - uzrok je bio RSA-SHA1 (Porezna od
+01.07.2026. u testnoj okolini odbija RSA-SHA1, traži RSA-SHA256). Engine
+prebačen na RSA-SHA256 + exclusive c14n. Commitano i pushano. Migracija
+NIJE deployana - full app flow (ugovor→račun→PDF→mail→stranica) protiv
+produkcije još nije testiran.
+
+**0) Odluke prije implementacije** (potvrđene s korisnikom): PDV 25%,
+`CompanySettings.vatRegistered` flag default true. Fiskalizacija ide pod
+`finaOib` iz env/DB (FLEET-ov testni cert OIB), NE pod
+`CompanySettings.oib` (rent-a-car tvrtka) - namjeran mismatch za probnu
+fazu, jasno označeno u PDF-u/kodu.
+
+**1) Engine port** - `packages/api/src/server/fiscalization/engine.ts`,
+temeljen na FLEET-ovom `fiskalizacija.ts`, pa uskladjen s Tehničkom
+specifikacijom v2.7 (21.07.2026). Nove ovisnosti (odobrene unaprijed):
+`node-forge@1.4.0`, `xml-crypto@6.1.2`, `@xmldom/xmldom@0.9.11`,
+`@types/node-forge`. `pnpm install --virtual-store-dir "C:/v"` (isti
+razlog kao Android build gotcha).
+
+**1a) UZROK s004 (i zašto FLEET nikad nije radio): RSA-SHA1.** Od
+01.07.2026. testna okolina (i produkcija od 01.01.2027.) ODBIJA poruke
+zahtjeva potpisane RSA-SHA1 sa s004. FLEET-ov engine (i moj prvi port,
+1:1) koristio je RSA-SHA1 → zato oboje pada identično. Ispravak u engine.ts:
+- `SignatureMethod` = `http://www.w3.org/2001/04/xmldsig-more#rsa-sha256`
+- `DigestMethod` = `http://www.w3.org/2001/04/xmlenc#sha256`
+  (NB: spec PDF u primjeru navodi `http://www.w3.org/2000/09/xmldsig#
+  rsa-sha256`/`#sha256`, ALI CIS te URI-jeve ODBIJA sa s004 - prihvaća
+  SAMO standardne W3C URI-jeve. Potvrđeno live matricom varijanti.)
+- `CanonicalizationMethod` = `http://www.w3.org/2001/10/xml-exc-c14n#`
+  (exclusive, spec 8.7.1 - bila je inclusive u FLEET verziji)
+- transformi: enveloped-signature + exclusive-c14n
+- `<Reference URI="#RacunZahtjev">` (Id = naziv root elementa, bilo "Msg")
+- `<Signature>` bez `ds:` prefiksa (default xmldsig namespace, per spec primjer)
+- ZKI (`izracunajZKI`): prvi korak RSA-SHA1 → RSA-SHA256 (spec pogl. 12),
+  MD5 hash tog potpisa u hex ostaje nepromijenjen
+xml-crypto nativno zna standardne SHA256 URI-jeve pa nema custom klasa.
+**Verificirano live protiv `cistest.apis-it.hr:8449/FiskalizacijaServiceTest`
+02.09.2026: JIR dobiven** za R1 (s PDV 25%) i za oslobođeni račun.
+
+**2) PDV/R1/R2** - `generirajRacunXML` dobio `<tns:Pdv>` blok
+(stopa/osnovica/iznos) kad `vatRegistered`, inače `<tns:IznosOslobPdv>`
+(mali porezni obveznik). R1/R2 razlika NIJE u CIS XML-u (RacunZahtjev f73
+shema nema polje za primatelja uopće) - razlika je ISKLJUČIVO na PDF-u
+(`InvoicePdf.tsx`): R1 = `Client.type` "pravna", prikazuje OIB primatelja;
+R2 = fizička osoba.
+
+**3) PoslovniProstorZahtjev** - `registerBusinessPremise()` u engine.ts,
+isti XMLDSig/SOAP princip. Strukturirana adresa poslovnog prostora dodana
+u `CompanySettings` (finaPremiseStreet/HouseNumber/City/PostalCode/
+WorkHours) - free-text `CompanySettings.address` se ne može pouzdano
+parsirati na CIS-ove zasebne XML elemente. Registracija se radi JEDNOM
+preko Postavke → Fiskalizacija ("Registriraj poslovni prostor"), status
+prati `finaPremiseRegisteredAt` (briše se automatski ako se OIB/oznaka/
+adresa prostora promijeni - stara registracija više ne vrijedi).
+
+**4) `Invoice` model** (migracija `20260901140000_add_fiscalization_and_invoices`,
+NIJE JOŠ DEPLOYANA) - `year`+`brOznRac`+`oznPosPr`+`oznNapUr` jedinstvena
+kombinacija, broj dodijeljen u `Serializable` transakciji (`max+1` po
+godini/prostoru/uređaju) PRIJE mrežnog poziva CIS-u - red se kreira sa
+`status: failed` i ZKI-jem odmah, broj OSTAJE zauzet čak i ako
+fiskalizacija padne (bez rupa u nizu, retry ide na ISTI broj -
+`retryInvoiceFiscalization`). Veze na RentPayment (1:1, izvor
+izdavanja)/Contract/Client.
+
+**5) UX flow** - "Najmovi" klik "Plaćeno" sad otvara potvrdu "Izdati
+račun?" (web: modal, mobile: `Alert.alert` s 3 gumba) PRIJE nego se išta
+sprema. "Da" → `POST /api/rent-payments/[id]/mark-paid` s
+`{issueInvoice:true}` (mark paid + fiskalizacija + PDF + mail klijentu u
+JEDNOM pozivu - fiskalizacija koja padne NE poništava "plaćeno", vraća se
+`invoiceError` koji UI prikaže). "Ne" → isto kao prije (samo paid=true).
+
+**6) "Izdani računi"** - `/invoices` (web) + `owner/invoices.tsx` (mobile,
+link s home menija), tablica/lista svih `Invoice` redaka (broj, datum,
+tip, kupac, vozilo, iznos, JIR, status), "PDF" gumb (presigned URL) i
+"Pokušaj ponovno" za `failed` retke.
+
+**7) Postavke → Fiskalizacija** (web `FiscalizationSection.tsx` + mobile
+prošireni `settings.tsx`) - vatRegistered toggle, FINA OIB/oznake, adresa
+poslovnog prostora, "Registriraj poslovni prostor" gumb. FINA cert upload
+(.p12 + zaporka) je WEB-ONLY (`POST /api/settings/fina-cert`, multipart) -
+mobile nema file picker za binarne certifikate bez nove ovisnosti
+(`expo-document-picker`, nije tražena/odobrena), mobile prikazuje samo
+status "certifikat postavljen/nije" i uređuje ostatak konfiguracije.
+
+**Verifikacija.** `tsc --noEmit` čisto na sva tri paketa, `next build`
+prošao (sve nove rute registrirane). **Live fiskalizacija: JIR dobiven
+iz cistest-a preko stvarnog `engine.ts`** (R1 s PDV-om + oslobođeni
+račun). Cert: NAVALIS-CISSA J.D.O.O., OIB 78414180122, `CN=FISKAL 1`,
+zaporka `Malalule2907`, oznPP `T`, oznNU `1`, URL
+`https://cistest.apis-it.hr:8449/FiskalizacijaServiceTest` (u Vercel env
+NIJE dodano - dodati kad se ide na produkcijski deploy). Migracija NIJE
+deployana → full app flow (Contract→RentPayment→"Plaćeno"→Invoice→PDF→
+mail→"Izdani računi") protiv produkcije JOŠ NIJE testiran.
+
+**Povijest istrage s004 (RIJEŠENO, v. točku 1a):** dan+ debugiranja prije
+nego se našao pravi uzrok. Testirano scratch skriptama protiv cistest-a:
+- Cert se ispravno učitava (par ključ/cert se podudara, nije istekao, OIB
+  u certu = OIB u računu = 78414180122).
+- CIS uporno vraća **`s004 Neispravan digitalni potpis`** na
+  `FiskalizacijaServiceTest` endpointu; `FiskalizacijaService` (bez "Test")
+  vraća `s006 Sistemska pogreška`.
+- Isprobano ~8 varijanti potpisa: inclusive/exclusive c14n, [enveloped]/
+  [enveloped+c14n] transformi, ds-prefiks/bez prefiksa, potpis unutar
+  SOAP konteksta / standalone, te POTPUNO RUČNO potpisivanje (Node crypto
+  `crypto.sign` nad bajt-egzaktnim kanonskim SignedInfo). SVE → s004.
+- Reference DigestValue neovisno provjeren = ispravan SHA1 kanonskog
+  RacunZahtjev-a. Lokalna xml-crypto verifikacija prolazi.
+- **FLEET-ov ORIGINALNI `fiskalizacija.ts` daje IDENTIČAN `s004`** s istim
+  certom → FLEET fiskalizacija nikad nije stvarno radila protiv CIS-a
+  (nema nijednog spremljenog JIR-a nigdje u FLEET repou/logovima).
+- Zaključak: potpisni bajtovi su kriptografski ispravni po specifikaciji;
+  problem je van koda.
+
+**DODATNA ISTRAGA (2026-09-02):**
+- **Cert NIJE istekao** - eksplicitno provjereno: notBefore
+  `2026-06-11T21:26:32Z`, notAfter `2030-07-31T12:30:18Z`, sada
+  `2026-09-02T05:24Z`. node-forge parsira u prave `Date` objekte,
+  usporedba preko `.getTime()` epoch ms (TZ-neovisno). +82 dana u
+  valjanosti, 1428 dana (~3.9 god) do isteka. Isto za CA cert.
+- **Endpoint**: `FiskalizacijaServiceTest` je ISPRAVAN (vraća
+  `<tns:RacunOdgovor>` = razumije operaciju); standardni
+  `FiskalizacijaService` vraća generički `<tns:Odgovor>` + s006.
+- **FLEET git history = mrtav trag.** ~16 commitova (11.-14.6.2026) su
+  SVI o `s006` (schema/c14n/format), NIJEDAN ne spominje s004, NIJEDAN ne
+  potvrđuje uspjeh. "fiskalizacija vraca ZKI uz JIR" (335f00d6) je samo
+  refactor povratnog tipa `Promise<string>` → `Promise<{jir,zki}>`, NE
+  potvrda da je JIR ikad stigao. Zadnji potpisni commit (5794e57d,
+  xml-crypto zamjena) je "nadaj se da radi" bez ijedne potvrde. Niz staje
+  i prelazi na multi-tenant refactor. Nigdje u FLEET repou/logovima nema
+  spremljenog JIR-a.
+- **Testirano ~10 potpisnih pristupa s NAVALIS certom protiv cistest-a**:
+  xml-crypto SOAP-kontekst / standalone, inclusive/exclusive c14n,
+  [enveloped]/[enveloped+c14n], ds-prefiks/bez, POTPUNO RUČNI
+  byte-egzaktni SignedInfo potpis (Node crypto), i **FLEET-ova TOČNA
+  povijesna ručna `potpišiXML` implementacija (commit cb88c857)** - SVE →
+  s004.
+- Cert profil: `keyUsage = digitalSignature + keyEncipherment`,
+  `EKU = emailProtection + clientAuth`. Namjenski FINA fiskalni
+  (aplikacijski) cert obično ima `digitalSignature + nonRepudiation` i
+  fiskalnu namjenu - moguće je da je izdan KRIVI profil (soft/osobni
+  umjesto aplikacijskog FISKAL certa).
+
+**FINALNI ZAKLJUČAK:** Kod je ispravan. Blokada je 100% eksterna - cert
+nije priznat/enrollan za fiskalizaciju za OIB 78414180122 na CIS test
+okruženju (ili je krivi profil certa). Treba FINA/APIS-IT podrška.
+
+**Dodatna provjera (nevidljivi znakovi):** hex/byte dump SVIH tekstualnih
+polja koja ulaze u RacunZahtjev (OIB, oznPP, oznNU, URL, zaporka, cert
+base64, cert orgId `HR78414180122`, certDerB64) → **svi čisti, 0
+nevidljivih znakova/BOM/whitespace**. DatVrijeme se generira svježe iz
+`new Date()` u trenutku slanja (nije hardkodiran). Svejedno dodana
+obrambena `sanitizeField()` higijena (strip zero-width/BOM, normalizacija
+egzotičnih razmaka, trim) na sva polja u `engine.ts` (`normalizeCert()` +
+poziv u `computeZki`/`fiscalizeRacun`/`registerBusinessPremise`).
+Ponovljen test s tim → **i dalje s004**. Time je nevidljivi-znak hipoteza
+konačno isključena; uzrok je potvrđeno eksteran.
+
+Sve scratch skripte obrisane, `.env` uklonjen, `git status` čist osim
+namjernih (necommitanih) izmjena. Ništa nije commitano.
+
+---
+
 **Zadnje ažurirano:** 2026-09-01, tridesetsedmi nastavak - tip klijenta
 (fizička/pravna osoba) + OIB lookup preko sudskog registra, portano iz
 FLEET projekta. Web + mobile. Kod gotov i typecheck/build čist; live sudreg

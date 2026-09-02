@@ -25,6 +25,7 @@ export default async function OwnerLayout({
   }
 
   const canSettings = principalHasPermission(principal, "settings");
+  const canInvoicing = principalHasPermission(principal, "invoicing");
 
   return (
     <>
@@ -37,6 +38,7 @@ export default async function OwnerLayout({
           <a href="/clients">Klijenti</a>
           <a href="/contracts">Ugovori</a>
           <a href="/najmovi">Najmovi</a>
+          {canInvoicing && <a href="/invoices">Računi</a>}
           {canSettings && <a href="/settings">Postavke</a>}
           {principal.kind === "owner" && <a href="/employees">Zaposlenici</a>}
           <form action="/api/auth/logout" method="POST" style={{ display: "inline" }}>

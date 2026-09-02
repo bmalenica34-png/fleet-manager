@@ -381,6 +381,26 @@ export async function sendRentPaymentOverdueEmail(params: {
   });
 }
 
+export async function sendInvoiceEmail(params: {
+  to: string;
+  recipientName: string;
+  invoiceNumber: string;
+  amount: number;
+  invoicePdf: Buffer;
+}): Promise<void> {
+  await sendEmail({
+    to: params.to,
+    subject: `Račun br. ${params.invoiceNumber}`,
+    html: `
+      <p>Poštovani/a ${params.recipientName},</p>
+      <p>U prilogu se nalazi fiskalizirani račun br. <strong>${params.invoiceNumber}</strong>
+      na iznos <strong>${params.amount.toFixed(2)} €</strong>.</p>
+      <p>Hvala,<br/>Rent-a-Car Manager</p>
+    `,
+    attachments: [{ filename: `racun-${params.invoiceNumber.replace(/\//g, "-")}.pdf`, content: params.invoicePdf }],
+  });
+}
+
 export async function sendWeeklyPaymentReminderEmail(params: { to: string }): Promise<void> {
   await sendEmail({
     to: params.to,

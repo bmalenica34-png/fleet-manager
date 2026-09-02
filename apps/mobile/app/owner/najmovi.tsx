@@ -1,5 +1,5 @@
 import { useCallback, useMemo, useState } from "react";
-import { ActivityIndicator, FlatList, Pressable, StyleSheet, Text, View } from "react-native";
+import { ActivityIndicator, Alert, FlatList, Pressable, StyleSheet, Text, View } from "react-native";
 import { useFocusEffect, useRouter } from "expo-router";
 import { formatDateHr } from "@rent-a-car/api";
 import { listRentPayments, markRentPaymentPaid, type RentPaymentDTO } from "../../src/lib/api";
@@ -22,11 +22,35 @@ export default function NajmoviScreen() {
 
   useFocusEffect(load);
 
-  async function handleMarkPaid(id: string) {
+  function promptMarkPaid(p: RentPaymentDTO) {
+    Alert.alert(
+      "Izdati račun?",
+      `${p.clientName} · ${p.vehicleLabel} · ${p.amount.toFixed(2)} €\n\n"Da" označava plaćeno i izdaje fiskalizirani račun (R1/R2) te ga šalje klijentu mailom. "Ne" samo označava plaćeno.`,
+      [
+        { text: "Odustani", style: "cancel" },
+        { text: "Ne, samo plaćeno", onPress: () => doMarkPaid(p.id, false) },
+        { text: "Da, izdaj račun", onPress: () => doMarkPaid(p.id, true) },
+      ]
+    );
+  }
+
+  async function doMarkPaid(id: string, issueInvoice: boolean) {
     setMarkingId(id);
     try {
-      await markRentPaymentPaid(id);
+      const res = await markRentPaymentPaid(id, issueInvoice);
+      if (res.invoiceError) {
+        Alert.alert("Račun nije izdan", `Plaćeno je spremljeno. ${res.invoiceError}`);
+      } else if (res.invoice) {
+        Alert.alert(
+          "Račun izdan",
+          res.invoice.status === "fiscalized"
+            ? `Račun ${res.invoice.number} fiskaliziran (JIR ${res.invoice.jir}).`
+            : `Račun ${res.invoice.number} kreiran, fiskalizacija nije uspjela — vidi "Računi".`
+        );
+      }
       load();
+    } catch (err) {
+      Alert.alert("Greška", err instanceof Error ? err.message : "Nije uspjelo");
     } finally {
       setMarkingId(null);
     }
@@ -93,7 +117,7 @@ export default function NajmoviScreen() {
               ) : (
                 <Pressable
                   style={[styles.button, markingId === item.id && styles.buttonDisabled]}
-                  onPress={() => handleMarkPaid(item.id)}
+                  onPress={() => promptMarkPaid(item)}
                   disabled={markingId === item.id}
                 >
                   <Text style={styles.buttonText}>{markingId === item.id ? "Spremanje..." : "Plaćeno"}</Text>

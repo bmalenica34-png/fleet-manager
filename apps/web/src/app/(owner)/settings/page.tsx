@@ -4,6 +4,7 @@ import { principalHasPermission, resolveOwnerAppPrincipal } from "@rent-a-car/ap
 import SettingsForm from "./SettingsForm";
 import TermsSection from "./TermsSection";
 import PeriodicReportsSection from "./PeriodicReportsSection";
+import FiscalizationSection from "./FiscalizationSection";
 
 // Settings je jedina stranica gdje se i sam PRISTUP (ne samo submit) gatea
 // server-side - (owner) layout već skriva "Postavke" link za employeeje bez
@@ -26,6 +27,7 @@ export default async function SettingsPage() {
     <>
       <SettingsForm />
       <PeriodicReportsSection />
+      <FiscalizationSection />
       <TermsSection />
     </>
   );
