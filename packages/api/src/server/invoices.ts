@@ -1,4 +1,5 @@
 import type { Invoice, InvoiceType } from "@prisma/client";
+import QRCode from "qrcode";
 import { prisma } from "../db/client";
 import { buildObjectKey, getPresignedDownloadUrl, uploadObject } from "../storage/hetzner";
 import { getCompanyInfoForPdf } from "./companySettings";
@@ -115,6 +116,41 @@ function zagrebYear(d: Date): number {
   return Number(
     new Intl.DateTimeFormat("hr-HR", { timeZone: "Europe/Zagreb", year: "numeric" }).format(d)
   );
+}
+
+// ── QR kod za provjeru računa (spec v2.7 pogl. 2.7) ─────────────────────────
+// https://porezna.gov.hr/rn?jir={JIR}&datv={GGGGMMDD_HHMM}&izn={eurocenti}
+//  - datv: datum/vrijeme izdavanja u Europe/Zagreb, BEZ sekundi (13 znakova)
+//  - izn: iznos u eurima+centima kao CIJELI BROJ, bez decimalnog separatora
+//    i bez vodećih nula, minus za negativan (spec: "bez ... bilo kakvih
+//    drugih separatora u sam iznos"). npr. 100,00 € → "10000", 12,50 → "1250"
+
+export function buildFiscalQrUrl(jir: string, invoiceDateTime: Date, totalAmount: number): string {
+  const parts = new Intl.DateTimeFormat("hr-HR", {
+    timeZone: "Europe/Zagreb",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).formatToParts(invoiceDateTime);
+  const g = (t: string) => parts.find((p) => p.type === t)?.value ?? "00";
+  const datv = `${g("year")}${g("month")}${g("day")}_${g("hour")}${g("minute")}`;
+  const cents = Math.round(Math.abs(totalAmount) * 100);
+  const izn = `${totalAmount < 0 ? "-" : ""}${cents}`;
+  return `https://porezna.gov.hr/rn?jir=${jir}&datv=${datv}&izn=${izn}`;
+}
+
+async function buildFiscalQrDataUrl(
+  jir: string,
+  invoiceDateTime: Date,
+  totalAmount: number
+): Promise<string> {
+  const url = buildFiscalQrUrl(jir, invoiceDateTime, totalAmount);
+  // ISO/IEC 15415, min "L" korekcija (spec) - "M" je sigurnija, jednaka veličina.
+  // margin 2 modula = ~quiet zone (spec traži ≥2mm oko koda).
+  return QRCode.toDataURL(url, { errorCorrectionLevel: "M", margin: 2, width: 256 });
 }
 
 // ── DTO ─────────────────────────────────────────────────────────────────────
@@ -369,6 +405,7 @@ async function generateAndSendInvoicePdf(invoiceId: string): Promise<void> {
     ? `Najam vozila ${c.vehicle.make} ${c.vehicle.model} (${c.vehicle.licensePlate})`
     : "Najam vozila";
   const period = await periodLabelForInvoice(inv.id);
+  const qrDataUrl = await buildFiscalQrDataUrl(inv.jir, inv.invoiceDateTime, inv.totalAmount);
 
   const pdf = await renderInvoicePdf({
     invoice: {
@@ -391,6 +428,7 @@ async function generateAndSendInvoicePdf(invoiceId: string): Promise<void> {
     },
     company,
     lineItemDescription: period ? `${lineItem}, razdoblje ${period}` : lineItem,
+    qrDataUrl,
   });
 
   const pdfKey = buildObjectKey(`invoices/${inv.id}`, `racun-${inv.brOznRac}-${inv.year}.pdf`);

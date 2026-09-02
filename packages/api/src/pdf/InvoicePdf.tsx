@@ -31,6 +31,10 @@ export interface InvoicePdfProps {
     logoUrl: string | null;
   };
   lineItemDescription: string;
+  // QR kod za provjeru računa kod Porezne uprave (obavezan od 01.01.2021,
+  // spec v2.7 pogl. 2.7). data:image/png;base64,... - null ako JIR nije
+  // dobiven (nefiskaliziran račun).
+  qrDataUrl: string | null;
 }
 
 const local = StyleSheet.create({
@@ -79,13 +83,24 @@ const local = StyleSheet.create({
   fiscalLine: { fontSize: 8, marginBottom: 2 },
   mono: { fontFamily: "Courier" },
   note: { fontSize: 8, color: "#555555", marginTop: 10 },
+  fiscalRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "flex-start" },
+  fiscalCol: { flex: 1, paddingRight: 8 },
+  qrBox: { alignItems: "center", width: 78 },
+  qrImg: { width: 64, height: 64 },
+  qrCaption: { fontSize: 6, color: "#555555", marginTop: 2, textAlign: "center" },
 });
 
 function money(n: number): string {
   return `${n.toFixed(2)} EUR`;
 }
 
-export function InvoicePdfDocument({ invoice, recipient, company, lineItemDescription }: InvoicePdfProps) {
+export function InvoicePdfDocument({
+  invoice,
+  recipient,
+  company,
+  lineItemDescription,
+  qrDataUrl,
+}: InvoicePdfProps) {
   const vatShown = invoice.vatRate > 0;
 
   return (
@@ -164,17 +179,27 @@ export function InvoicePdfDocument({ invoice, recipient, company, lineItemDescri
 
         <View style={local.fiscalBox}>
           <Text style={local.fiscalTitle}>Fiskalizacija</Text>
-          <Text style={local.fiscalLine}>
-            JIR: <Text style={local.mono}>{invoice.jir ?? "—"}</Text>
-          </Text>
-          <Text style={local.fiscalLine}>
-            ZKI: <Text style={local.mono}>{invoice.zki}</Text>
-          </Text>
-          <Text style={local.fiscalLine}>OIB izdavatelja (fiskalizacija): {invoice.oibIssuer}</Text>
-          <Text style={[local.fiscalLine, { color: "#555555", marginTop: 3 }]}>
-            Ovaj je račun fiskaliziran sukladno Zakonu o fiskalizaciji. Provjera na
-            porezna-uprava.hr.
-          </Text>
+          <View style={local.fiscalRow}>
+            <View style={local.fiscalCol}>
+              <Text style={local.fiscalLine}>
+                JIR: <Text style={local.mono}>{invoice.jir ?? "—"}</Text>
+              </Text>
+              <Text style={local.fiscalLine}>
+                ZKI: <Text style={local.mono}>{invoice.zki}</Text>
+              </Text>
+              <Text style={local.fiscalLine}>OIB izdavatelja (fiskalizacija): {invoice.oibIssuer}</Text>
+              <Text style={[local.fiscalLine, { color: "#555555", marginTop: 3 }]}>
+                Ovaj je račun fiskaliziran sukladno Zakonu o fiskalizaciji. Provjera računa
+                skeniranjem QR koda ili na porezna.gov.hr/rn.
+              </Text>
+            </View>
+            {qrDataUrl ? (
+              <View style={local.qrBox}>
+                <Image src={qrDataUrl} style={local.qrImg} />
+                <Text style={local.qrCaption}>Provjera računa</Text>
+              </View>
+            ) : null}
+          </View>
         </View>
 
         <Text style={styles.footer}>

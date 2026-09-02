@@ -4,11 +4,23 @@ Dinamički log stanja projekta. Ažurira se na kraju svake sesije. Za statičnu
 arhitekturu/konvencije vidi [CLAUDE.md](CLAUDE.md) — ovaj dokument je "što je
 gotovo i zašto", ne "kako treba izgledati".
 
-**Zadnje ažurirano:** 2026-09-02, tridesetdeveti nastavak - migracija
-deployana, full end-to-end fiskalizacija testirana protiv produkcije +
-cistest-a. **R1 i R2 računi izdani, JIR dobiven, PDF/mail/lista rade.**
-Tijekom testa nađena i popravljena 2 buga (Prisma tx timeout na PKCS12
-loadu, poslovni prostor s006). Commitano i pushano.
+**Zadnje ažurirano:** 2026-09-02, četrdeseti nastavak - QR kod za provjeru
+računa dodan na InvoicePdf (obavezan od 01.01.2021, spec v2.7 pogl. 2.7).
+Nova ovisnost `qrcode` (odobrena). Format: `https://porezna.gov.hr/rn?
+jir={JIR}&datv={GGGGMMDD_HHMM}&izn={eurocenti_bez_separatora}` -
+`buildFiscalQrUrl()` u invoices.ts. **Verificirano stvarnim skeniranjem**
+(jsQR round-trip decode privremenim dev-depom, uklonjen nakon):
+dekodirani string === očekivani URL. datv u Europe/Zagreb bez sekundi;
+izn = `Math.round(iznos*100)` cijeli broj (npr. 123,45 € → `12345`, spec:
+"bez ... bilo kakvih drugih separatora u sam iznos"). QR se renderira u
+Fiskalizacija bloku PDF-a (i R1 i R2), ~64pt (>2cm). tsc/build čisto,
+commitano i pushano.
+
+**39. nastavak (isti dan):** migracija deployana, full E2E fiskalizacija
+testirana protiv produkcije + cistest-a. R1 i R2 računi izdani, JIR
+dobiven, PDF/mail/lista rade. Popravljena 2 buga (Prisma tx timeout na
+PKCS12 loadu → certCache + prewarmCert, poslovni prostor s006 → gate
+uklonjen, stari model). Commit "Fix fiscalization tx timeout...".
 
 **38. nastavak (isti dan):** port engine-a + R1/R2. s004 blokada RIJEŠENA
 - uzrok RSA-SHA1 (Porezna od 01.07.2026. u testnoj okolini odbija SHA1,
