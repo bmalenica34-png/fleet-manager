@@ -218,7 +218,11 @@ export default function FiscalizationSection() {
       <p className="muted" style={{ margin: "0.25rem 0 0.5rem" }}>
         {settings?.finaPremiseRegisteredAt
           ? `✓ registriran ${formatDateTimeHr(settings.finaPremiseRegisteredAt)}`
-          : "nije registriran — obavezno prije izdavanja prvog računa"}
+          : "nije registriran"}
+        {" — "}
+        NIJE preduvjet za izdavanje računa (račun se fiskalizira i bez toga).
+        Prijava radnog vremena po novom modelu (Fiskalizacija 2.0) još nije
+        implementirana; ovaj gumb koristi stari model i može javiti grešku.
       </p>
       {registerMsg && <p className="muted">{registerMsg}</p>}
       <button
@@ -227,7 +231,7 @@ export default function FiscalizationSection() {
         onClick={handleRegisterPremise}
         disabled={registering || !settings?.hasFinaCert}
       >
-        {registering ? "Registracija..." : "Registriraj poslovni prostor"}
+        {registering ? "Registracija..." : "Registriraj poslovni prostor (stari model)"}
       </button>
     </div>
   );

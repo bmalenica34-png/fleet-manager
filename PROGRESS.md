@@ -4,13 +4,16 @@ Dinamički log stanja projekta. Ažurira se na kraju svake sesije. Za statičnu
 arhitekturu/konvencije vidi [CLAUDE.md](CLAUDE.md) — ovaj dokument je "što je
 gotovo i zašto", ne "kako treba izgledati".
 
-**Zadnje ažurirano:** 2026-09-02, tridesetosmi nastavak - port
-fiskalizacijskog engine-a + R1/R2 fakturiranje. **RADI: JIR se dobiva iz
-cistest-a.** s004 blokada RIJEŠENA - uzrok je bio RSA-SHA1 (Porezna od
-01.07.2026. u testnoj okolini odbija RSA-SHA1, traži RSA-SHA256). Engine
-prebačen na RSA-SHA256 + exclusive c14n. Commitano i pushano. Migracija
-NIJE deployana - full app flow (ugovor→račun→PDF→mail→stranica) protiv
-produkcije još nije testiran.
+**Zadnje ažurirano:** 2026-09-02, tridesetdeveti nastavak - migracija
+deployana, full end-to-end fiskalizacija testirana protiv produkcije +
+cistest-a. **R1 i R2 računi izdani, JIR dobiven, PDF/mail/lista rade.**
+Tijekom testa nađena i popravljena 2 buga (Prisma tx timeout na PKCS12
+loadu, poslovni prostor s006). Commitano i pushano.
+
+**38. nastavak (isti dan):** port engine-a + R1/R2. s004 blokada RIJEŠENA
+- uzrok RSA-SHA1 (Porezna od 01.07.2026. u testnoj okolini odbija SHA1,
+traži SHA256). Engine na RSA-SHA256 + exclusive c14n. Commit "Add Croatian
+fiscalization (CIS) + R1/R2 invoicing".
 
 **0) Odluke prije implementacije** (potvrđene s korisnikom): PDV 25%,
 `CompanySettings.vatRegistered` flag default true. Fiskalizacija ide pod
@@ -90,15 +93,61 @@ mobile nema file picker za binarne certifikate bez nove ovisnosti
 (`expo-document-picker`, nije tražena/odobrena), mobile prikazuje samo
 status "certifikat postavljen/nije" i uređuje ostatak konfiguracije.
 
-**Verifikacija.** `tsc --noEmit` čisto na sva tri paketa, `next build`
-prošao (sve nove rute registrirane). **Live fiskalizacija: JIR dobiven
-iz cistest-a preko stvarnog `engine.ts`** (R1 s PDV-om + oslobođeni
-račun). Cert: NAVALIS-CISSA J.D.O.O., OIB 78414180122, `CN=FISKAL 1`,
-zaporka `Malalule2907`, oznPP `T`, oznNU `1`, URL
-`https://cistest.apis-it.hr:8449/FiskalizacijaServiceTest` (u Vercel env
-NIJE dodano - dodati kad se ide na produkcijski deploy). Migracija NIJE
-deployana → full app flow (Contract→RentPayment→"Plaćeno"→Invoice→PDF→
-mail→"Izdani računi") protiv produkcije JOŠ NIJE testiran.
+**39. nastavak - deploy + full E2E test:**
+- Migracija `20260901140000_add_fiscalization_and_invoices` **DEPLOYANA**
+  na produkciju (`prisma migrate deploy`, potvrđeno).
+- Full E2E scratch test protiv PRODUKCIJSKE baze + cistest-a: privremeno
+  postavljen FINA test cert u `CompanySettings`, kreiran test Vehicle +
+  2 Client-a (pravna/fizička) + weekly Contract-i + RentPayment periodi,
+  `markRentPaymentPaid` + `issueInvoiceForRentPayment` za prvi period.
+  Rezultat:
+  - **R1** (pravna osoba): račun `1/T/1`, status `fiscalized`, JIR dobiven,
+    ZKI OK. PDF sadrži JIR/ZKI/"Račun R1"/naziv izdavatelja/naziv+OIB
+    primatelja/"PDV 25%". Mail poslan klijentu (na `OWNER_EMAIL` u testu).
+    Pojavljuje se u `listInvoices()`.
+  - **R2** (fizička osoba): račun `2/T/1`, status `fiscalized`, JIR dobiven.
+    PDF "Račun R2", primatelj bez OIB-a. Mail poslan. U listi.
+  - **NAPOMENA PDV**: R2 je u testu IPAK imao PDV 25% (osnovica 80 / PDV
+    20 / ukupno 100). To je ISPRAVNO po hrvatskom pravu - PDV ovisi o
+    tome je li IZDAVATELJ u sustavu PDV-a (`CompanySettings.vatRegistered`),
+    NE o tipu primatelja. R1/R2 razlika je samo iskazuje li se OIB
+    primatelja. "R2 = oslobođeno" iz zahtjeva nije standardno pravilo -
+    ako se stvarno želi, treba eksplicitna potvrda (nestandardno).
+  - Sav test podatak obrisan, `CompanySettings` vraćen na prijašnje
+    (prazno) stanje, `git status` čist, 0 leftover redaka.
+- **Bug 1 (popravljen): Prisma interactive-tx timeout.** `computeZki` unutar
+  `$transaction` radi `loadCert` (forge PKCS12 dešifriranje ~5s) → probije
+  5s tx timeout (P2028). Fix: `certCache` Map u engine.ts + `prewarmCert()`
+  poziv PRIJE transakcije + tx `timeout: 15_000`.
+- **Bug 2 (zaobiđen, ne popravljen): poslovni prostor → s006.** Spec v2.7
+  je ZAMIJENILA `PoslovniProstorZahtjev` s `PrijaviRadnoVrijemeZahtjev`
+  (Fiskalizacija 2.0, strukturirano radno vrijeme po danu). Stari model
+  → s006. **NIJE preduvjet za RacunZahtjev** (potvrđeno - JIR stiže bez
+  toga). Uklonjen `premiseRegisteredAt` hard-gate iz
+  `issueInvoiceForRentPayment`; `registerBusinessPremise` ostaje s
+  komentarom "pred-v2.7, TODO prebaciti na PrijaviRadnoVrijemeZahtjev";
+  Postavke UI označava gumb kao "(stari model)" + "nije preduvjet".
+- **Mobile paritet**: verificirano na razini koda - `najmovi.tsx`
+  (`Alert.alert` "Izdati račun?" s 3 gumba), `invoices.tsx` ("Računi"
+  ekran, JIR/PDF/"Pokušaj ponovno"), `api.ts` (isti endpointi:
+  `/api/rent-payments/[id]/mark-paid` s `{issueInvoice}`, `/api/invoices`,
+  `/api/invoices/[id]/pdf|retry`). Mobile i web dijele isti server kod
+  (`packages/api`) koji je E2E testiran - RN app nije zasebno pokrenut.
+- `tsc --noEmit` čisto na sva 3 paketa, `next build` prošao.
+
+**Preostalo:** `FINA_URL=.../FiskalizacijaServiceTest` + FINA cert u
+`CompanySettings` (preko Postavke → Fiskalizacija ili ručno) da bi
+DEPLOYANA app radila fiskalizaciju - u ovom testu cert je bio samo
+privremeno postavljen pa vraćen. Prelazak na pravi produkcijski FINA cert
++ `cis.porezna-uprava.hr` URL = zaseban budući korak. v2.7 prijava radnog
+vremena (`PrijaviRadnoVrijemeZahtjev`) = zaseban budući korak.
+
+--- (stariji zapis 38. nastavka) ---
+
+**Verifikacija (38).** `tsc --noEmit` čisto, `next build` prošao. Live
+fiskalizacija: JIR dobiven iz cistest-a. Cert: NAVALIS-CISSA J.D.O.O.,
+OIB 78414180122, `CN=FISKAL 1`, zaporka `Malalule2907`, oznPP `T`, oznNU
+`1`, URL `https://cistest.apis-it.hr:8449/FiskalizacijaServiceTest`.
 
 **Povijest istrage s004 (RIJEŠENO, v. točku 1a):** dan+ debugiranja prije
 nego se našao pravi uzrok. Testirano scratch skriptama protiv cistest-a:

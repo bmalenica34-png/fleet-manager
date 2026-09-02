@@ -8,6 +8,7 @@ import {
   computeZki,
   fiscalizeRacun,
   nacinPlacanjaCIS,
+  prewarmCert,
   registerBusinessPremise,
   type FiscalCert,
   type PdvStavka,
@@ -215,11 +216,14 @@ export async function issueInvoiceForRentPayment(rentPaymentId: string): Promise
   if (!rp) throw new InvoiceError("Period naplate ne postoji");
 
   const config = await loadFiscalConfig();
-  if (!config.premiseRegisteredAt) {
-    throw new InvoiceError(
-      "Poslovni prostor nije registriran kod CIS-a. Otvori Postavke → Fiskalizacija i klikni 'Registriraj poslovni prostor'."
-    );
-  }
+  // NB: NE tražimo prethodnu registraciju poslovnog prostora/radnog vremena.
+  // Verificirano protiv cistest-a: RacunZahtjev prolazi i vraća JIR bez toga.
+  // (v2.7 model za radno vrijeme = `PrijaviRadnoVrijemeZahtjev`, zasebna
+  // buduća funkcionalnost - vidi registerBusinessPremise komentar u engine.)
+
+  // PKCS12 dešifriranje je ~5s - pred-učitaj cert PRIJE transakcije (unutar
+  // koje se računa ZKI), inače Prisma 5s interactive-tx timeout pukne.
+  prewarmCert(config.cert);
 
   const client = rp.contract.client;
   const type: InvoiceType = client.type === "pravna" ? "R1" : "R2";
@@ -276,7 +280,7 @@ export async function issueInvoiceForRentPayment(rentPaymentId: string): Promise
         },
       });
     },
-    { isolationLevel: "Serializable" }
+    { isolationLevel: "Serializable", timeout: 15_000 }
   );
 
   return finalizeInvoice(invoice.id);
